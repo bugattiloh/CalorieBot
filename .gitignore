@@ -1,0 +1,9 @@
+bin/
+obj/
+.vs/
+.idea/
+.vscode/
+*.user
+
+# Секреты наружу не выкладываю — в репозитории только .env.example.
+.env

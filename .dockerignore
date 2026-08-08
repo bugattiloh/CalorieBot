@@ -1,0 +1,15 @@
+# В контекст сборки не тащу результаты локальных сборок и настройки IDE.
+**/bin/
+**/obj/
+**/.vs/
+**/.idea/
+**/.vscode/
+.git/
+.gitignore
+.env
+*.user
+*.md
+docker-compose*.yml
+Dockerfile
+TBotCBJUChecker/
+TBotCBJUChecker.sln

@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "CalorieBot": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:8080",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "Bot__Token": "",
+        "ConnectionStrings__Default": "Host=localhost;Port=5432;Database=caloriebot;Username=caloriebot;Password=caloriebot_local_password"
+      }
+    }
+  }
+}

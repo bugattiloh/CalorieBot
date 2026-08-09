@@ -16,7 +16,8 @@ public static class Keyboards
     {
         new KeyboardButton[] { Buttons.AddMeal, Buttons.Progress },
         new KeyboardButton[] { Buttons.Favorites, Buttons.Limit },
-        new KeyboardButton[] { Buttons.History }
+        new KeyboardButton[] { Buttons.History, Buttons.NewDay },
+        new KeyboardButton[] { Buttons.CycleHistory }
     })
     {
         ResizeKeyboard = true,
@@ -74,6 +75,16 @@ public static class Keyboards
         new[] { InlineKeyboardButton.WithCallbackData("🔙 В меню", Callbacks.ToMenu) }
     });
 
+    /// <summary>
+    /// Выбор режима ввода БЖУ. <paramref name="action"/> — <see cref="Callbacks.MealMacrosMode"/>
+    /// или <see cref="Callbacks.FavoriteMacrosMode"/>, в зависимости от того, где идёт диалог.
+    /// </summary>
+    public static InlineKeyboardMarkup MacrosModeChoice(string action) => new(new[]
+    {
+        new[] { InlineKeyboardButton.WithCallbackData("📏 На 100 г продукта", Callbacks.Build(action, "100")) },
+        new[] { InlineKeyboardButton.WithCallbackData("🍽 На порцию целиком", Callbacks.Build(action, "full")) }
+    });
+
     /// <summary>Предложение сохранить только что введённый продукт в избранное.</summary>
     public static InlineKeyboardMarkup SaveFavoriteConfirm { get; } = new(new[]
     {
@@ -105,6 +116,13 @@ public static class Keyboards
     public static InlineKeyboardMarkup SkipServingSize { get; } = new(new[]
     {
         new[] { InlineKeyboardButton.WithCallbackData("⏭ Пропустить", Callbacks.SkipServing) }
+    });
+
+    /// <summary>Подтверждение начала нового дня — сброс цикла случайным тапом быть не должен.</summary>
+    public static InlineKeyboardMarkup NewDayConfirm { get; } = new(new[]
+    {
+        new[] { InlineKeyboardButton.WithCallbackData("🆕 Да, начать новый день", Callbacks.Build(Callbacks.NewDayConfirm, "yes")) },
+        new[] { InlineKeyboardButton.WithCallbackData("❌ Отмена", Callbacks.Build(Callbacks.NewDayConfirm, "no")) }
     });
 
     /// <summary>Одинокая кнопка возврата в меню — вешаю её на «тупиковые» сообщения.</summary>

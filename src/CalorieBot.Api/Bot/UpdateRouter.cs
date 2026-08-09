@@ -20,6 +20,7 @@ public sealed class UpdateRouter
     private readonly FavoritesScenario _favorites;
     private readonly LimitScenario _limit;
     private readonly ProgressScenario _progress;
+    private readonly CycleScenario _cycle;
     private readonly ILogger<UpdateRouter> _logger;
 
     public UpdateRouter(
@@ -30,6 +31,7 @@ public sealed class UpdateRouter
         FavoritesScenario favorites,
         LimitScenario limit,
         ProgressScenario progress,
+        CycleScenario cycle,
         ILogger<UpdateRouter> logger)
     {
         _messenger = messenger;
@@ -39,6 +41,7 @@ public sealed class UpdateRouter
         _favorites = favorites;
         _limit = limit;
         _progress = progress;
+        _cycle = cycle;
         _logger = logger;
     }
 
@@ -109,12 +112,20 @@ public sealed class UpdateRouter
                 await _meal.HandleMacrosAsync(chatId, userId, text, ct);
                 return;
 
+            case ConversationState.AwaitingMealServingGrams:
+                await _meal.HandleServingGramsAsync(chatId, userId, text, ct);
+                return;
+
             case ConversationState.AwaitingFavoriteName:
                 await _favorites.HandleNameAsync(chatId, userId, text, ct);
                 return;
 
             case ConversationState.AwaitingFavoriteMacros:
                 await _favorites.HandleMacrosAsync(chatId, userId, text, ct);
+                return;
+
+            case ConversationState.AwaitingFavoriteServingGrams:
+                await _favorites.HandleServingGramsAsync(chatId, userId, text, ct);
                 return;
 
             case ConversationState.AwaitingFavoriteServingSize:
@@ -155,6 +166,14 @@ public sealed class UpdateRouter
 
             case Buttons.History:
                 await _progress.ShowHistoryAsync(chatId, userId, ct);
+                return true;
+
+            case Buttons.NewDay:
+                await _cycle.ShowNewDayConfirmAsync(chatId, userId, ct);
+                return true;
+
+            case Buttons.CycleHistory:
+                await _cycle.ShowHistoryAsync(chatId, userId, page: 0, editMessageId: null, ct);
                 return true;
 
             // Подменю «Добавить прием пищи».
@@ -221,6 +240,23 @@ public sealed class UpdateRouter
         {
             case Callbacks.MealType:
                 await _meal.HandleMealTypeAsync(query, argument, ct);
+                return;
+
+            case Callbacks.MealMacrosMode:
+                await _meal.HandleMacrosModeAsync(query, argument, ct);
+                return;
+
+            case Callbacks.FavoriteMacrosMode:
+                await _favorites.HandleMacrosModeAsync(query, argument, ct);
+                return;
+
+            case Callbacks.NewDayConfirm:
+                await _cycle.HandleNewDayConfirmAsync(query, argument, ct);
+                return;
+
+            case Callbacks.CycleHistoryPage:
+                await _messenger.AnswerAsync(query, ct: ct);
+                await _cycle.ShowHistoryAsync(chatId, userId, ParsePage(argument), messageId, ct);
                 return;
 
             case Callbacks.PickFavorite:

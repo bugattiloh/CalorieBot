@@ -38,9 +38,21 @@ public static class Texts
     public static readonly string AskProductName =
         $"Как называется продукт?\n\nОтправьте название сообщением (от {InputParser.MinNameLength} до {InputParser.MaxNameLength} символов).";
 
+    public const string AskMacrosMode =
+        "Как вам удобнее указать БЖУ?\n\n" +
+        "📏 <b>На 100 г</b> — я потом спрошу вес порции и сам пересчитаю на неё.\n" +
+        "🍽 <b>На порцию целиком</b> — введённые числа так и запишу.";
+
     public const string AskMacros =
         "Теперь пришлите БЖУ <b>на порцию</b> в граммах — три числа в порядке <b>белки жиры углеводы</b>.\n\n" +
         "Например: <code>12 5 30</code>\n\nКалории я посчитаю сам по формуле Б×4 + Ж×9 + У×4.";
+
+    public const string AskMacrosPerHundred =
+        "Пришлите БЖУ <b>на 100 г продукта</b> — три числа в порядке <b>белки жиры углеводы</b>.\n\n" +
+        "Например: <code>12 5 30</code>";
+
+    public const string AskServingGrams =
+        "Сколько грамм в порции? Отправьте число, например <code>150</code> — пересчитаю БЖУ и калории на этот вес.";
 
     public const string AskServingSize =
         "Опишите порцию — например <code>200 г</code> или <code>1 стакан</code>.\n\n" +
@@ -90,11 +102,12 @@ public static class Texts
     }
 
     /// <summary>Главный экран прогресса.</summary>
-    public static string Progress(DailyProgress progress)
+    public static string Progress(DailyProgress progress, TimeSpan offset)
     {
         var builder = new StringBuilder();
 
-        builder.AppendLine($"📊 <b>Прогресс за {LocalDate(progress.LocalDate)}</b>");
+        var cycleStart = new DateTimeOffset(DateTime.SpecifyKind(progress.CycleStartedAt, DateTimeKind.Utc)).ToOffset(offset);
+        builder.AppendLine("📊 <b>Мой прогресс</b>");
         builder.AppendLine();
         builder.AppendLine($"Съедено <b>{progress.ConsumedCalories}</b> из <b>{progress.CalorieLimit}</b> ккал ({progress.PercentUsed}% от лимита).");
 
@@ -104,7 +117,7 @@ public static class Texts
             builder.AppendLine(ProgressBar(progress.PercentUsed));
             builder.AppendLine();
             builder.AppendLine($"⚠️ <b>Лимит превышен на {progress.ExceededBy} ккал!</b>");
-            builder.AppendLine("Сегодня лучше остановиться — а завтра счётчик начнётся с нуля.");
+            builder.AppendLine("Не забудьте: счётчик не обнулится сам — нажмите «🆕 Новый день», когда будете готовы.");
         }
         else
         {
@@ -117,8 +130,8 @@ public static class Texts
         builder.AppendLine(MacroLine("🧈 Ж", progress.Fats, progress.FatsLimit));
         builder.AppendLine(MacroLine("🍞 У", progress.Carbs, progress.CarbsLimit));
         builder.AppendLine();
-        builder.AppendLine($"Приёмов пищи сегодня: <b>{progress.EntriesCount}</b>");
-        builder.AppendLine($"До сброса счётчика: {Duration(progress.TimeUntilReset)}");
+        builder.AppendLine($"Приёмов пищи в этом цикле: <b>{progress.EntriesCount}</b>");
+        builder.AppendLine($"Цикл идёт: {Duration(progress.CycleElapsed)} (с {cycleStart:dd.MM HH:mm})");
         builder.AppendLine();
 
         if (progress.IsExceeded || progress.RemainingCalories == 0)
@@ -166,16 +179,18 @@ public static class Texts
         return builder.ToString();
     }
 
-    /// <summary>История за сегодня, сгруппированная по типам приёмов пищи.</summary>
+    /// <summary>История текущего цикла, сгруппированная по типам приёмов пищи.</summary>
     public static string History(IReadOnlyList<FoodLogEntry> entries, DailyProgress progress, TimeSpan offset)
     {
+        var cycleStart = new DateTimeOffset(DateTime.SpecifyKind(progress.CycleStartedAt, DateTimeKind.Utc)).ToOffset(offset);
+
         var builder = new StringBuilder();
-        builder.AppendLine($"📋 <b>История за {LocalDate(progress.LocalDate)}</b>");
+        builder.AppendLine($"📋 <b>История текущего цикла</b> (с {cycleStart:dd.MM HH:mm})");
         builder.AppendLine();
 
         if (entries.Count == 0)
         {
-            builder.AppendLine("Сегодня вы ещё ничего не записали.");
+            builder.AppendLine("В этом цикле вы ещё ничего не записали.");
             builder.AppendLine();
             builder.Append($"Дневной лимит: <b>{progress.CalorieLimit} ккал</b> — весь ваш.");
             return builder.ToString();
@@ -192,8 +207,9 @@ public static class Texts
                 var serving = string.IsNullOrWhiteSpace(entry.ServingSize) ? string.Empty : $", {Escape(entry.ServingSize!)}";
                 var favoriteMark = entry.IsFavorite ? " ⭐" : string.Empty;
 
+                // Цикл может растянуться дольше суток, поэтому дату в отметке времени не прячу.
                 builder.AppendLine(
-                    $"  • {localTime:HH:mm} {Escape(entry.ProductName)}{serving} — {entry.Calories} ккал{favoriteMark}");
+                    $"  • {localTime:dd.MM HH:mm} {Escape(entry.ProductName)}{serving} — {entry.Calories} ккал{favoriteMark}");
             }
 
             builder.AppendLine();
@@ -206,6 +222,55 @@ public static class Texts
 
         return builder.ToString();
     }
+
+    /// <summary>Спрашиваю подтверждение перед закрытием текущего цикла.</summary>
+    public static string AskNewDayConfirm(DailyProgress progress, TimeSpan offset)
+    {
+        var cycleStart = new DateTimeOffset(DateTime.SpecifyKind(progress.CycleStartedAt, DateTimeKind.Utc)).ToOffset(offset);
+
+        var builder = new StringBuilder();
+        builder.AppendLine("🆕 <b>Начать новый день?</b>");
+        builder.AppendLine();
+        builder.AppendLine($"Текущий цикл идёт с {cycleStart:dd.MM HH:mm} ({Duration(progress.CycleElapsed)}).");
+        builder.AppendLine($"Съедено: <b>{progress.ConsumedCalories}</b> из <b>{progress.CalorieLimit}</b> ккал ({progress.PercentUsed}%).");
+        builder.AppendLine();
+        builder.Append("Он сохранится в «📅 Прошлые циклы», а счётчик обнулится и пойдёт заново.");
+
+        return builder.ToString();
+    }
+
+    /// <summary>Подтверждение того, что новый цикл начат.</summary>
+    public static string NewDayStarted(CalorieCycle closedCycle) =>
+        $"✅ Новый день начат — счётчик обнулён.\n\n" +
+        $"Прошлый цикл сохранён в историю: <b>{closedCycle.ConsumedCalories}</b> из <b>{closedCycle.CalorieLimit}</b> ккал.";
+
+    /// <summary>Список прошлых циклов, новые сверху.</summary>
+    public static string CycleHistoryPage(IReadOnlyList<CalorieCycle> cycles, int page, int pageSize, int totalCount, TimeSpan offset)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"📅 <b>Прошлые циклы</b> ({totalCount})");
+        builder.AppendLine();
+
+        var index = page * pageSize + 1;
+        foreach (var cycle in cycles)
+        {
+            var start = new DateTimeOffset(DateTime.SpecifyKind(cycle.StartedAt, DateTimeKind.Utc)).ToOffset(offset);
+            var end = new DateTimeOffset(DateTime.SpecifyKind(cycle.EndedAt, DateTimeKind.Utc)).ToOffset(offset);
+            var percent = cycle.CalorieLimit <= 0 ? 0 : (int)Math.Round(cycle.ConsumedCalories * 100m / cycle.CalorieLimit, MidpointRounding.AwayFromZero);
+            var mark = cycle.ConsumedCalories > cycle.CalorieLimit ? " ⚠️" : string.Empty;
+
+            builder.AppendLine($"<b>{index}. {start:dd.MM HH:mm}</b> → {end:dd.MM HH:mm} ({Duration(end - start)})");
+            builder.AppendLine(
+                $"   🔥 {cycle.ConsumedCalories} из {cycle.CalorieLimit} ккал ({percent}%){mark} · " +
+                $"Б {Num(cycle.Proteins)} · Ж {Num(cycle.Fats)} · У {Num(cycle.Carbs)} · записей: {cycle.EntriesCount}");
+            index++;
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    public const string EmptyCycleHistory =
+        "📅 Прошлых циклов пока нет.\n\nОни появятся здесь после того, как вы хотя бы раз нажмёте «🆕 Новый день».";
 
     /// <summary>Экран «Текущий лимит».</summary>
     public static string CurrentLimit(AppUser user, DailyProgress progress, TimeSpan offset)

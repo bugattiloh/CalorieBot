@@ -49,6 +49,7 @@ builder.Services.AddScoped<MealScenario>();
 builder.Services.AddScoped<FavoritesScenario>();
 builder.Services.AddScoped<LimitScenario>();
 builder.Services.AddScoped<ProgressScenario>();
+builder.Services.AddScoped<CycleScenario>();
 
 // Порядок важен: сначала миграции, потом поллинг.
 builder.Services.AddHostedService<DatabaseMigratorHostedService>();

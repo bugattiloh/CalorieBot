@@ -6,11 +6,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CalorieBot.Core.Services;
 
-/// <summary>Прогресс по дневному лимиту.</summary>
+/// <summary>Прогресс по дневному лимиту в рамках текущего цикла подсчёта КБЖУ.</summary>
 public interface IProgressService
 {
-    /// <summary>Считаю прогресс за текущий день и подбираю избранное, влезающее в остаток.</summary>
-    Task<DailyProgress> GetTodayAsync(long userId, CancellationToken ct);
+    /// <summary>Считаю прогресс за текущий цикл (с <see cref="AppUser.CycleStartedAt"/>) и подбираю избранное, влезающее в остаток.</summary>
+    Task<DailyProgress> GetCurrentCycleAsync(long userId, CancellationToken ct);
 
     /// <summary>Только избранное, которое вписывается в остаток лимита.</summary>
     Task<IReadOnlyList<FavoriteProduct>> GetFittingFavoritesAsync(long userId, int remainingCalories, CancellationToken ct);
@@ -39,14 +39,14 @@ public sealed class ProgressService : IProgressService
         _clock = clock;
     }
 
-    public async Task<DailyProgress> GetTodayAsync(long userId, CancellationToken ct)
+    public async Task<DailyProgress> GetCurrentCycleAsync(long userId, CancellationToken ct)
     {
         var user = await _users.GetAsync(userId, ct);
-        var (startUtc, endUtc) = _clock.TodayUtcRange;
+        var cycleStart = user.CycleStartedAt;
 
-        // Суммы считаю на стороне Postgres — тянуть все записи дня в память незачем.
+        // Суммы считаю на стороне Postgres — тянуть все записи цикла в память незачем.
         var totals = await _db.FoodLog
-            .Where(e => e.UserId == userId && e.LoggedAt >= startUtc && e.LoggedAt < endUtc)
+            .Where(e => e.UserId == userId && e.LoggedAt >= cycleStart)
             .GroupBy(_ => 1)
             .Select(g => new
             {
@@ -63,7 +63,7 @@ public sealed class ProgressService : IProgressService
 
         return new DailyProgress
         {
-            LocalDate = _clock.LocalToday,
+            CycleStartedAt = cycleStart,
             CalorieLimit = user.DailyCalorieLimit,
             ConsumedCalories = consumed,
             Proteins = totals?.Proteins ?? 0m,
@@ -73,7 +73,7 @@ public sealed class ProgressService : IProgressService
             FatsLimit = user.DailyFatsLimit,
             CarbsLimit = user.DailyCarbsLimit,
             EntriesCount = totals?.Count ?? 0,
-            TimeUntilReset = _clock.TimeUntilReset,
+            CycleElapsed = _clock.UtcNow - cycleStart,
             FittingFavorites = await GetFittingFavoritesAsync(userId, remaining, ct)
         };
     }

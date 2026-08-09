@@ -12,6 +12,13 @@ public sealed class ConversationContext
 
     public string? ProductName { get; set; }
 
+    /// <summary>
+    /// Пользователь выбрал вводить БЖУ на 100 г, а не на порцию целиком. Пока жду вес порции,
+    /// <see cref="Proteins"/>/<see cref="Fats"/>/<see cref="Carbs"/> временно хранят значения именно на 100 г,
+    /// а не итоговый черновик — пересчёт происходит в сценарии после ввода веса.
+    /// </summary>
+    public bool MacrosPerHundredGrams { get; set; }
+
     public decimal Proteins { get; set; }
 
     public decimal Fats { get; set; }
@@ -55,6 +62,7 @@ public sealed class ConversationContext
     {
         State = ConversationState.Idle;
         ProductName = null;
+        MacrosPerHundredGrams = false;
         Proteins = 0m;
         Fats = 0m;
         Carbs = 0m;

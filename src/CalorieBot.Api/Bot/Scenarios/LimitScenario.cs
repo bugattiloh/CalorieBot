@@ -66,7 +66,7 @@ public sealed class LimitScenario
         }
 
         var user = await _users.UpdateCalorieLimitAsync(userId, limit, ct);
-        var progress = await _progress.GetTodayAsync(userId, ct);
+        var progress = await _progress.GetCurrentCycleAsync(userId, ct);
 
         _states.Get(userId).Reset();
 
@@ -77,7 +77,7 @@ public sealed class LimitScenario
     public async Task ShowCurrentAsync(long chatId, long userId, CancellationToken ct)
     {
         var user = await _users.GetAsync(userId, ct);
-        var progress = await _progress.GetTodayAsync(userId, ct);
+        var progress = await _progress.GetCurrentCycleAsync(userId, ct);
 
         await _messenger.SendAsync(
             chatId,

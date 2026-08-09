@@ -21,6 +21,7 @@ public static class CoreServiceCollectionExtensions
         services.AddScoped<IFavoriteProductService, FavoriteProductService>();
         services.AddScoped<IFoodLogService, FoodLogService>();
         services.AddScoped<IProgressService, ProgressService>();
+        services.AddScoped<ICycleService, CycleService>();
 
         return services;
     }

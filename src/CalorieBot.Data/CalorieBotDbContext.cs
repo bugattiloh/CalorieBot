@@ -18,6 +18,8 @@ public class CalorieBotDbContext : DbContext
 
     public DbSet<FoodLogEntry> FoodLog => Set<FoodLogEntry>();
 
+    public DbSet<CalorieCycle> CalorieCycles => Set<CalorieCycle>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -37,6 +39,7 @@ public class CalorieBotDbContext : DbContext
             entity.Property(e => e.DailyCarbsLimit).HasColumnType("numeric(7,2)");
             entity.Property(e => e.CreatedAt).HasColumnType("timestamp with time zone").HasDefaultValueSql("now()");
             entity.Property(e => e.GoalSetAt).HasColumnType("timestamp with time zone");
+            entity.Property(e => e.CycleStartedAt).IsRequired().HasColumnType("timestamp with time zone").HasDefaultValueSql("now()");
         });
 
         modelBuilder.Entity<FavoriteProduct>(entity =>
@@ -89,6 +92,28 @@ public class CalorieBotDbContext : DbContext
 
             // Главный запрос бота — «что съедено за сегодня», под него и индекс.
             entity.HasIndex(e => new { e.UserId, e.LoggedAt });
+        });
+
+        modelBuilder.Entity<CalorieCycle>(entity =>
+        {
+            entity.ToTable("CalorieCycles");
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.CalorieLimit).IsRequired();
+            entity.Property(e => e.ConsumedCalories).IsRequired();
+            entity.Property(e => e.Proteins).HasColumnType("numeric(7,2)").HasDefaultValue(0m);
+            entity.Property(e => e.Fats).HasColumnType("numeric(7,2)").HasDefaultValue(0m);
+            entity.Property(e => e.Carbs).HasColumnType("numeric(7,2)").HasDefaultValue(0m);
+            entity.Property(e => e.StartedAt).HasColumnType("timestamp with time zone").IsRequired();
+            entity.Property(e => e.EndedAt).HasColumnType("timestamp with time zone").IsRequired();
+
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.Cycles)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // История листается новыми сверху — под этот порядок и индекс.
+            entity.HasIndex(e => new { e.UserId, e.EndedAt });
         });
     }
 }

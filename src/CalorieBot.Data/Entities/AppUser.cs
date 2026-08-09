@@ -31,7 +31,16 @@ public class AppUser
     /// <summary>Когда лимит был выставлен в последний раз — показываю это в «Текущий лимит».</summary>
     public DateTime? GoalSetAt { get; set; }
 
+    /// <summary>
+    /// Начало текущего цикла подсчёта КБЖУ. Автоматического сброса по календарным суткам нет —
+    /// у людей разные жизненные циклы, поэтому цикл живёт, пока пользователь сам не нажмёт «Новый день»
+    /// (тогда текущий цикл уезжает в <see cref="CalorieCycle"/>, а это поле сдвигается на «сейчас»).
+    /// </summary>
+    public DateTime CycleStartedAt { get; set; }
+
     public ICollection<FavoriteProduct> FavoriteProducts { get; set; } = new List<FavoriteProduct>();
 
     public ICollection<FoodLogEntry> FoodLog { get; set; } = new List<FoodLogEntry>();
+
+    public ICollection<CalorieCycle> Cycles { get; set; } = new List<CalorieCycle>();
 }

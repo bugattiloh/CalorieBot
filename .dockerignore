@@ -11,5 +11,4 @@
 *.md
 docker-compose*.yml
 Dockerfile
-TBotCBJUChecker/
-TBotCBJUChecker.sln
+tests/

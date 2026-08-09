@@ -19,6 +19,12 @@ public interface IUserService
 
     /// <summary>Меняю дневной максимум калорий и пересчитываю ориентиры по БЖУ.</summary>
     Task<AppUser> UpdateCalorieLimitAsync(long userId, int newLimit, CancellationToken ct);
+
+    /// <summary>
+    /// Сдвигаю начало текущего цикла подсчёта КБЖУ на <paramref name="startedAt"/> (обычно «сейчас»)
+    /// и обновляю кэш — иначе <see cref="GetAsync"/> ещё какое-то время отдавал бы старое значение.
+    /// </summary>
+    Task<AppUser> SetCycleStartAsync(long userId, DateTime startedAt, CancellationToken ct);
 }
 
 /// <inheritdoc />
@@ -72,7 +78,8 @@ public sealed class UserService : IUserService
                 DailyFatsLimit = macros.Fats,
                 DailyCarbsLimit = macros.Carbs,
                 CreatedAt = _clock.UtcNow,
-                GoalSetAt = null
+                GoalSetAt = null,
+                CycleStartedAt = _clock.UtcNow
             };
 
             _db.Users.Add(user);
@@ -140,6 +147,17 @@ public sealed class UserService : IUserService
         return Cache(user);
     }
 
+    public async Task<AppUser> SetCycleStartAsync(long userId, DateTime startedAt, CancellationToken ct)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.UserId == userId, ct)
+                   ?? throw new InvalidOperationException($"Пользователь {userId} не найден.");
+
+        user.CycleStartedAt = startedAt;
+        await _db.SaveChangesAsync(ct);
+
+        return Cache(user);
+    }
+
     /// <summary>
     /// Кладу в кэш отсоединённую копию: сама сущность привязана к scoped-контексту,
     /// и делить её между запросами нельзя.
@@ -156,7 +174,8 @@ public sealed class UserService : IUserService
             DailyFatsLimit = user.DailyFatsLimit,
             DailyCarbsLimit = user.DailyCarbsLimit,
             CreatedAt = user.CreatedAt,
-            GoalSetAt = user.GoalSetAt
+            GoalSetAt = user.GoalSetAt,
+            CycleStartedAt = user.CycleStartedAt
         };
 
         _cache.Set(CacheKey(user.UserId), snapshot, CacheLifetime);

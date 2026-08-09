@@ -20,6 +20,10 @@ public static partial class InputParser
     /// <summary>Больше килограмма одного макронутриента в порции быть не может — считаю это ошибкой ввода.</summary>
     public const decimal MaxMacroGrams = 1000m;
 
+    /// <summary>Разумные границы веса порции при пересчёте БЖУ со 100 г.</summary>
+    public const int MinServingGrams = 1;
+    public const int MaxServingGrams = 5000;
+
     /// <summary>Вытаскиваю из строки все числа, разделитель дробной части допускаю любой.</summary>
     [GeneratedRegex(@"\d+(?:[.,]\d+)?", RegexOptions.CultureInvariant)]
     private static partial Regex NumberRegex();
@@ -135,6 +139,36 @@ public static partial class InputParser
         }
 
         limit = rounded;
+        return true;
+    }
+
+    /// <summary>Разбираю вес порции в граммах — нужен, чтобы пересчитать БЖУ со 100 г на реальную порцию.</summary>
+    public static bool TryParseServingGrams(string? input, out int grams, out string error)
+    {
+        grams = 0;
+        error = string.Empty;
+
+        var matches = NumberRegex().Matches(input ?? string.Empty);
+        if (matches.Count != 1)
+        {
+            error = "Отправьте одно число — вес порции в граммах. Например: <code>150</code>";
+            return false;
+        }
+
+        if (!TryParseDecimal(matches[0].Value, out var value))
+        {
+            error = "Не понял число. Отправьте вес порции в граммах, например <code>150</code>.";
+            return false;
+        }
+
+        var rounded = (int)Math.Round(value, MidpointRounding.AwayFromZero);
+        if (rounded < MinServingGrams || rounded > MaxServingGrams)
+        {
+            error = $"Вес порции должен быть от {MinServingGrams} до {MaxServingGrams} г.";
+            return false;
+        }
+
+        grams = rounded;
         return true;
     }
 

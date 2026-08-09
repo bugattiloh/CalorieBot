@@ -6,7 +6,7 @@ using CalorieBot.Core.Time;
 namespace CalorieBot.Api.Bot.Scenarios;
 
 /// <summary>
-/// Сценарии просмотра: «📊 Мой прогресс» и «📋 История сегодня».
+/// Сценарии просмотра: «📊 Мой прогресс» и «📋 Текущий цикл».
 /// Оба экрана только читают данные, поэтому состояние диалога здесь сбрасываю.
 /// </summary>
 public sealed class ProgressScenario
@@ -36,17 +36,17 @@ public sealed class ProgressScenario
     {
         _states.Get(userId).Reset();
 
-        var progress = await _progress.GetTodayAsync(userId, ct);
-        await _messenger.SendAsync(chatId, Texts.Progress(progress), Keyboards.MainMenu, ct);
+        var progress = await _progress.GetCurrentCycleAsync(userId, ct);
+        await _messenger.SendAsync(chatId, Texts.Progress(progress, _clock.Offset), Keyboards.MainMenu, ct);
     }
 
-    /// <summary>Что съедено за сегодня, с разбивкой по приёмам пищи.</summary>
+    /// <summary>Что съедено в текущем цикле, с разбивкой по приёмам пищи.</summary>
     public async Task ShowHistoryAsync(long chatId, long userId, CancellationToken ct)
     {
         _states.Get(userId).Reset();
 
-        var entries = await _foodLog.GetTodayAsync(userId, ct);
-        var progress = await _progress.GetTodayAsync(userId, ct);
+        var entries = await _foodLog.GetCurrentCycleAsync(userId, ct);
+        var progress = await _progress.GetCurrentCycleAsync(userId, ct);
 
         await _messenger.SendAsync(
             chatId,

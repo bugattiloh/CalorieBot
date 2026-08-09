@@ -18,20 +18,22 @@ public interface IFoodLogService
         int? favoriteProductId,
         CancellationToken ct);
 
-    /// <summary>Всё, что съедено за текущий «бот-день» (UTC+3), по порядку добавления.</summary>
-    Task<IReadOnlyList<FoodLogEntry>> GetTodayAsync(long userId, CancellationToken ct);
+    /// <summary>Всё, что съедено с начала текущего цикла (<see cref="AppUser.CycleStartedAt"/>), по порядку добавления.</summary>
+    Task<IReadOnlyList<FoodLogEntry>> GetCurrentCycleAsync(long userId, CancellationToken ct);
 }
 
 /// <inheritdoc />
 public sealed class FoodLogService : IFoodLogService
 {
     private readonly CalorieBotDbContext _db;
+    private readonly IUserService _users;
     private readonly IDayClock _clock;
     private readonly ILogger<FoodLogService> _logger;
 
-    public FoodLogService(CalorieBotDbContext db, IDayClock clock, ILogger<FoodLogService> logger)
+    public FoodLogService(CalorieBotDbContext db, IUserService users, IDayClock clock, ILogger<FoodLogService> logger)
     {
         _db = db;
+        _users = users;
         _clock = clock;
         _logger = logger;
     }
@@ -68,14 +70,14 @@ public sealed class FoodLogService : IFoodLogService
         return entry;
     }
 
-    public async Task<IReadOnlyList<FoodLogEntry>> GetTodayAsync(long userId, CancellationToken ct)
+    public async Task<IReadOnlyList<FoodLogEntry>> GetCurrentCycleAsync(long userId, CancellationToken ct)
     {
-        // Дневной счётчик обнуляется в полночь по UTC+3 — вместо «чистки» просто беру срез за нужный интервал.
-        var (startUtc, endUtc) = _clock.TodayUtcRange;
+        // Цикл не «чистится» по расписанию — вместо этого беру срез с момента его начала.
+        var user = await _users.GetAsync(userId, ct);
 
         return await _db.FoodLog
             .AsNoTracking()
-            .Where(e => e.UserId == userId && e.LoggedAt >= startUtc && e.LoggedAt < endUtc)
+            .Where(e => e.UserId == userId && e.LoggedAt >= user.CycleStartedAt)
             .OrderBy(e => e.LoggedAt)
             .ToListAsync(ct);
     }

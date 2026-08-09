@@ -9,6 +9,12 @@ public static class Callbacks
     /// <summary>Выбран тип приёма пищи: mt:1..4.</summary>
     public const string MealType = "mt";
 
+    /// <summary>Выбран режим ввода БЖУ для нового продукта дневника: mmm:100 или mmm:full.</summary>
+    public const string MealMacrosMode = "mmm";
+
+    /// <summary>Выбран режим ввода БЖУ для избранного: fmm:100 или fmm:full.</summary>
+    public const string FavoriteMacrosMode = "fmm";
+
     /// <summary>Выбран любимый продукт для записи в дневник: pf:{id}.</summary>
     public const string PickFavorite = "pf";
 
@@ -41,6 +47,12 @@ public static class Callbacks
 
     /// <summary>Возврат в главное меню.</summary>
     public const string ToMenu = "menu";
+
+    /// <summary>Подтверждение начала нового дня (закрытие текущего цикла): ndy:yes или ndy:no.</summary>
+    public const string NewDayConfirm = "ndy";
+
+    /// <summary>Листание истории прошлых циклов: chp:{page}.</summary>
+    public const string CycleHistoryPage = "chp";
 
     /// <summary>Кнопка-заглушка (например, счётчик страниц) — ничего не делает.</summary>
     public const string Noop = "noop";

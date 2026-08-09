@@ -3,13 +3,13 @@ using CalorieBot.Data.Entities;
 namespace CalorieBot.Core.Models;
 
 /// <summary>
-/// Срез дня: сколько съедено, сколько осталось до лимита и что из избранного ещё вписывается.
-/// Все производные величины считаю здесь, чтобы хендлеры занимались только текстом.
+/// Срез текущего цикла подсчёта КБЖУ: сколько съедено, сколько осталось до лимита и что из избранного
+/// ещё вписывается. Все производные величины считаю здесь, чтобы хендлеры занимались только текстом.
 /// </summary>
 public sealed record DailyProgress
 {
-    /// <summary>Дата «бот-дня» (UTC+3), за который посчитан прогресс.</summary>
-    public required DateOnly LocalDate { get; init; }
+    /// <summary>Когда пользователь начал текущий цикл (UTC) — вручную кнопкой «Новый день» или при регистрации.</summary>
+    public required DateTime CycleStartedAt { get; init; }
 
     public required int CalorieLimit { get; init; }
 
@@ -29,8 +29,8 @@ public sealed record DailyProgress
 
     public int EntriesCount { get; init; }
 
-    /// <summary>Сколько осталось до полуночи по UTC+3 — показываю в прогрессе.</summary>
-    public TimeSpan TimeUntilReset { get; init; }
+    /// <summary>Сколько времени идёт текущий цикл — показываю в прогрессе вместо «сброса по расписанию».</summary>
+    public TimeSpan CycleElapsed { get; init; }
 
     /// <summary>Избранное, которое ещё влезает в остаток лимита.</summary>
     public IReadOnlyList<FavoriteProduct> FittingFavorites { get; init; } = Array.Empty<FavoriteProduct>();

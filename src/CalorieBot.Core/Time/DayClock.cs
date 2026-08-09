@@ -1,24 +1,15 @@
 namespace CalorieBot.Core.Time;
 
 /// <summary>
-/// Часы бота. Вынес их за интерфейс, чтобы логику дня можно было проверить тестами
-/// без привязки к реальному времени.
+/// Часы бота. Вынес их за интерфейс, чтобы время можно было проверить тестами
+/// без привязки к реальным системным часам.
 /// </summary>
 public interface IDayClock
 {
     DateTime UtcNow { get; }
 
-    /// <summary>Смещение, в котором живёт бот (UTC+3).</summary>
+    /// <summary>Смещение для отображения времени пользователю (UTC+3). Циклы КБЖУ от него не зависят.</summary>
     TimeSpan Offset { get; }
-
-    /// <summary>Текущая дата в UTC+3 — «сегодня» с точки зрения пользователя.</summary>
-    DateOnly LocalToday { get; }
-
-    /// <summary>Границы текущего дня в UTC: [начало; конец). По ним фильтрую журнал.</summary>
-    (DateTime StartUtc, DateTime EndUtc) TodayUtcRange { get; }
-
-    /// <summary>Сколько осталось до сброса дневного счётчика (полночь UTC+3).</summary>
-    TimeSpan TimeUntilReset { get; }
 
     /// <summary>Перевожу время из UTC в локальное для показа пользователю.</summary>
     DateTimeOffset ToLocal(DateTime utc);
@@ -37,29 +28,6 @@ public sealed class DayClock : IDayClock
 
     public TimeSpan Offset => BotOffset;
 
-    public DateOnly LocalToday => DateOnly.FromDateTime(LocalNow.DateTime);
-
-    public (DateTime StartUtc, DateTime EndUtc) TodayUtcRange
-    {
-        get
-        {
-            var local = LocalNow;
-            var startLocal = new DateTimeOffset(local.Year, local.Month, local.Day, 0, 0, 0, BotOffset);
-            return (startLocal.UtcDateTime, startLocal.AddDays(1).UtcDateTime);
-        }
-    }
-
-    public TimeSpan TimeUntilReset
-    {
-        get
-        {
-            var left = TodayUtcRange.EndUtc - UtcNow;
-            return left < TimeSpan.Zero ? TimeSpan.Zero : left;
-        }
-    }
-
     public DateTimeOffset ToLocal(DateTime utc) =>
         new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToOffset(BotOffset);
-
-    private DateTimeOffset LocalNow => new DateTimeOffset(UtcNow, TimeSpan.Zero).ToOffset(BotOffset);
 }

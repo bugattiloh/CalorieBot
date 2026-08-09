@@ -71,7 +71,7 @@ public sealed class MealScenario
             return;
         }
 
-        var progress = await _progress.GetTodayAsync(userId, ct);
+        var progress = await _progress.GetCurrentCycleAsync(userId, ct);
         var text = Texts.PickFavoriteHeader(progress, favorites.Count);
 
         // Продукты, которые уже не влезают в остаток лимита, помечаю — но выбрать их не запрещаю.
@@ -139,7 +139,7 @@ public sealed class MealScenario
         await _messenger.SendAsync(chatId, Texts.AskProductName, Keyboards.MealMenu, ct);
     }
 
-    /// <summary>Принимаю название нового продукта.</summary>
+    /// <summary>Принимаю название нового продукта и спрашиваю, как удобнее ввести БЖУ.</summary>
     public async Task HandleNameAsync(long chatId, long userId, string? text, CancellationToken ct)
     {
         if (!InputParser.TryParseProductName(text, out var name, out var error))
@@ -150,12 +150,46 @@ public sealed class MealScenario
 
         var context = _states.Get(userId);
         context.ProductName = name;
-        context.State = ConversationState.AwaitingMealProductMacros;
+        context.State = ConversationState.AwaitingMealMacrosMode;
 
-        await _messenger.SendAsync(chatId, Texts.AskMacros, Keyboards.MealMenu, ct);
+        var sent = await _messenger.SendAsync(chatId, Texts.AskMacrosMode, Keyboards.MacrosModeChoice(Callbacks.MealMacrosMode), ct);
+        context.ActiveInlineMessageId = sent.MessageId;
     }
 
-    /// <summary>Принимаю БЖУ, считаю калории и предлагаю сохранить продукт в избранное.</summary>
+    /// <summary>Пользователь выбрал, как вводить БЖУ — на 100 г или сразу на всю порцию.</summary>
+    public async Task HandleMacrosModeAsync(CallbackQuery query, string? argument, CancellationToken ct)
+    {
+        if (query.Message is null)
+        {
+            await _messenger.AnswerAsync(query, Texts.StaleDialog, ct: ct);
+            return;
+        }
+
+        var userId = query.From.Id;
+        var context = _states.Get(userId);
+
+        if (string.IsNullOrEmpty(context.ProductName))
+        {
+            await _messenger.AnswerAsync(query, Texts.StaleDialog, showAlert: true, ct: ct);
+            return;
+        }
+
+        context.MacrosPerHundredGrams = argument == "100";
+        context.State = ConversationState.AwaitingMealProductMacros;
+
+        await _messenger.AnswerAsync(query, ct: ct);
+        await _messenger.EditAsync(
+            query.Message.Chat.Id,
+            query.Message.MessageId,
+            context.MacrosPerHundredGrams ? Texts.AskMacrosPerHundred : Texts.AskMacros,
+            replyMarkup: null,
+            ct);
+    }
+
+    /// <summary>
+    /// Принимаю БЖУ. На порцию целиком — сразу считаю калории и предлагаю сохранить в избранное.
+    /// На 100 г — запоминаю значения и жду вес порции, чтобы пересчитать их на реальную порцию.
+    /// </summary>
     public async Task HandleMacrosAsync(long chatId, long userId, string? text, CancellationToken ct)
     {
         if (!InputParser.TryParseMacros(text, out var proteins, out var fats, out var carbs, out var error))
@@ -173,7 +207,53 @@ public sealed class MealScenario
             return;
         }
 
+        if (context.MacrosPerHundredGrams)
+        {
+            context.Proteins = proteins;
+            context.Fats = fats;
+            context.Carbs = carbs;
+            context.State = ConversationState.AwaitingMealServingGrams;
+
+            await _messenger.SendAsync(chatId, Texts.AskServingGrams, Keyboards.MealMenu, ct);
+            return;
+        }
+
         var draft = ProductDraft.FromMacros(context.ProductName, proteins, fats, carbs);
+        await OfferToSaveFavoriteAsync(chatId, context, draft, ct);
+    }
+
+    /// <summary>Принимаю вес порции и пересчитываю запомненные БЖУ со 100 г на реальную порцию.</summary>
+    public async Task HandleServingGramsAsync(long chatId, long userId, string? text, CancellationToken ct)
+    {
+        if (!InputParser.TryParseServingGrams(text, out var grams, out var error))
+        {
+            await _messenger.SendAsync(chatId, Texts.ValidationError(error), Keyboards.MealMenu, ct);
+            return;
+        }
+
+        var context = _states.Get(userId);
+
+        if (string.IsNullOrWhiteSpace(context.ProductName))
+        {
+            await StartNewProductAsync(chatId, userId, ct);
+            return;
+        }
+
+        // В context.Proteins/Fats/Carbs сейчас лежат значения на 100 г — масштабирую на введённый вес.
+        var scale = grams / 100m;
+        var draft = ProductDraft.FromMacros(
+            context.ProductName,
+            Math.Round(context.Proteins * scale, 1),
+            Math.Round(context.Fats * scale, 1),
+            Math.Round(context.Carbs * scale, 1),
+            servingSize: $"{grams} г");
+
+        await OfferToSaveFavoriteAsync(chatId, context, draft, ct);
+    }
+
+    /// <summary>Общая точка после того, как черновик продукта готов: показываю карточку и предлагаю сохранить в избранное.</summary>
+    private async Task OfferToSaveFavoriteAsync(long chatId, ConversationContext context, ProductDraft draft, CancellationToken ct)
+    {
         context.Apply(draft);
 
         // Дальше только инлайн-кнопки, текстовый ввод больше не жду.
@@ -255,7 +335,7 @@ public sealed class MealScenario
             context.FavoriteProductId,
             ct);
 
-        var progress = await _progress.GetTodayAsync(userId, ct);
+        var progress = await _progress.GetCurrentCycleAsync(userId, ct);
 
         // Сценарий завершён — освобождаю состояние, чтобы старые кнопки ничего не записали повторно.
         context.Reset();

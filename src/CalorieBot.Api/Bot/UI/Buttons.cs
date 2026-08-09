@@ -11,7 +11,9 @@ public static class Buttons
     public const string Progress = "📊 Мой прогресс";
     public const string Favorites = "⭐ Любимые продукты";
     public const string Limit = "🎯 Дневной лимит";
-    public const string History = "📋 История сегодня";
+    public const string History = "📋 Текущий цикл";
+    public const string NewDay = "🆕 Новый день";
+    public const string CycleHistory = "📅 Прошлые циклы";
 
     // Подменю «Добавить прием пищи».
     public const string FromFavorites = "💝 Из любимых";

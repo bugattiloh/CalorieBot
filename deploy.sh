@@ -1,42 +1,84 @@
 #!/usr/bin/env bash
-# Разворачивает CalorieBot одной командой: ./deploy.sh
-# Собирает образ, поднимает postgres + bot через docker compose и ждёт, пока оба станут healthy.
+# Разворачивает CalorieBot на сервере одной командой: ./deploy.sh
+#
+# Никаких файлов редактировать вручную не нужно: скрипт сам ставит Docker, если его нет
+# (с подтверждением в консоли), спрашивает токен бота при первом запуске и генерирует
+# пароль базы данных. Дальше — собирает образ, поднимает postgres + bot и ждёт, пока оба
+# станут healthy.
 set -euo pipefail
 cd "$(dirname "$0")"
 
+confirm() {
+    # confirm "Вопрос" — по умолчанию "да", если просто нажать Enter.
+    local reply
+    read -r -p "$1 [Y/n] " reply </dev/tty
+    [[ -z "$reply" || "$reply" =~ ^[Yy] ]]
+}
+
+# --- 1. Docker и Compose ---------------------------------------------------
+
 if ! command -v docker >/dev/null 2>&1; then
-    echo "Docker не найден. Установите Docker (и Compose plugin) перед запуском: https://docs.docker.com/engine/install/" >&2
+    echo "Docker на этом сервере не найден."
+    if ! confirm "Установить Docker автоматически (официальный скрипт get.docker.com)?"; then
+        echo "Без Docker продолжить не могу. Установите его вручную: https://docs.docker.com/engine/install/" >&2
+        exit 1
+    fi
+
+    INSTALL_SUDO=""
+    [ "$(id -u)" -ne 0 ] && INSTALL_SUDO="sudo"
+
+    curl -fsSL https://get.docker.com | $INSTALL_SUDO sh
+    $INSTALL_SUDO systemctl enable --now docker >/dev/null 2>&1 || true
+    echo "Docker установлен."
+fi
+
+# Докеру после свежей установки иногда нужны root-права, пока пользователя не перелогинили
+# в группу docker — подстраховываюсь через sudo, если без него команды не проходят.
+DOCKER_SUDO=""
+if [ "$(id -u)" -ne 0 ] && ! docker info >/dev/null 2>&1; then
+    DOCKER_SUDO="sudo"
+fi
+
+if $DOCKER_SUDO docker compose version >/dev/null 2>&1; then
+    COMPOSE=($DOCKER_SUDO docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE=($DOCKER_SUDO docker-compose)
+else
+    echo "Docker поставился, но Compose plugin не нашёлся — обновите Docker: https://docs.docker.com/compose/install/" >&2
     exit 1
 fi
 
-if docker compose version >/dev/null 2>&1; then
-    COMPOSE=(docker compose)
-elif command -v docker-compose >/dev/null 2>&1; then
-    COMPOSE=(docker-compose)
-else
-    echo "Не найден ни 'docker compose', ни 'docker-compose'." >&2
-    exit 1
-fi
+# --- 2. .env: токен бота и пароль базы --------------------------------------
 
 if [ ! -f .env ]; then
     cp .env.example .env
-    echo "Создал .env из .env.example."
-    echo "Заполните в нём BOT_TOKEN (из @BotFather) и POSTGRES_PASSWORD, затем запустите ./deploy.sh ещё раз."
-    exit 1
+    chmod 600 .env
 fi
 
-# Секреты обязаны быть заполнены реальными значениями — placeholder'ы из .env.example не считаются.
-missing=()
-if ! grep -qE '^BOT_TOKEN=[0-9]+:.+' .env; then
-    missing+=("BOT_TOKEN")
+current_token="$(grep -E '^BOT_TOKEN=' .env | cut -d= -f2-)"
+if [[ ! "$current_token" =~ ^[0-9]+:.+ ]]; then
+    echo
+    echo "Нужен токен бота из @BotFather (там: /mybots → выбрать бота → API Token)."
+    while true; do
+        read -r -p "Вставьте BOT_TOKEN: " bot_token </dev/tty
+        if [[ "$bot_token" =~ ^[0-9]+:.+ ]]; then
+            break
+        fi
+        echo "Не похоже на токен BotFather (формат вроде 123456789:AA...). Попробуйте ещё раз."
+    done
+    # Экранирую спецсимволы sed, чтобы токен с произвольными символами не сломал замену.
+    escaped_token=$(printf '%s' "$bot_token" | sed 's/[&/\]/\\&/g')
+    sed -i "s|^BOT_TOKEN=.*|BOT_TOKEN=${escaped_token}|" .env
 fi
-if grep -qE '^POSTGRES_PASSWORD=\s*(change_me_please)?\s*$' .env; then
-    missing+=("POSTGRES_PASSWORD")
+
+current_password="$(grep -E '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)"
+if [ -z "$current_password" ] || [ "$current_password" = "change_me_please" ]; then
+    generated_password="$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32)"
+    sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${generated_password}|" .env
+    echo "Сгенерировал случайный пароль для PostgreSQL и сохранил его в .env на сервере."
 fi
-if [ "${#missing[@]}" -gt 0 ]; then
-    echo "В .env не заполнены: ${missing[*]}. Отредактируйте .env и запустите скрипт снова." >&2
-    exit 1
-fi
+
+# --- 3. Сборка и запуск ------------------------------------------------------
 
 echo "Собираю образ и поднимаю сервисы..."
 "${COMPOSE[@]}" up -d --build
@@ -67,3 +109,4 @@ port="${port:-8080}"
 echo
 echo "Готово. Проверить: curl http://localhost:${port}/health"
 echo "Логи бота: ${COMPOSE[*]} logs -f bot"
+echo "Открыть бота в Telegram и отправить /start."

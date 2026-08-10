@@ -18,10 +18,13 @@ public interface IFavoriteProductService
     Task<FavoriteProduct?> GetAsync(long userId, int favoriteId, CancellationToken ct);
 
     /// <summary>
-    /// Добавляю продукт в избранное. Если продукт с таким названием уже есть, обновляю его КБЖУ
+    /// Добавляю продукт в избранное. Если продукт с таким названием уже есть, обновляю его КБЖУ и тип порции
     /// и возвращаю Created = false — так пользователь не получит ошибку из-за дубля.
     /// </summary>
-    Task<(bool Created, FavoriteProduct Product)> AddOrUpdateAsync(long userId, ProductDraft draft, CancellationToken ct);
+    Task<(bool Created, FavoriteProduct Product)> AddOrUpdateAsync(long userId, ProductDraft draft, bool isFixedServing, CancellationToken ct);
+
+    /// <summary>Переключаю тип порции без изменения КБЖУ — для отдельной кнопки в карточке продукта.</summary>
+    Task<FavoriteProduct> SetFixedServingAsync(long userId, int favoriteId, bool isFixedServing, CancellationToken ct);
 
     /// <summary>Удаляю продукт из избранного. Записи журнала при этом остаются.</summary>
     Task<FavoriteProduct?> DeleteAsync(long userId, int favoriteId, CancellationToken ct);
@@ -77,6 +80,7 @@ public sealed class FavoriteProductService : IFavoriteProductService
     public async Task<(bool Created, FavoriteProduct Product)> AddOrUpdateAsync(
         long userId,
         ProductDraft draft,
+        bool isFixedServing,
         CancellationToken ct)
     {
         var existing = await _db.FavoriteProducts
@@ -88,6 +92,7 @@ public sealed class FavoriteProductService : IFavoriteProductService
             existing.Proteins = draft.Proteins;
             existing.Fats = draft.Fats;
             existing.Carbs = draft.Carbs;
+            existing.IsFixedServing = isFixedServing;
             existing.ServingSize = draft.ServingSize ?? existing.ServingSize;
 
             await _db.SaveChangesAsync(ct);
@@ -105,6 +110,7 @@ public sealed class FavoriteProductService : IFavoriteProductService
             Proteins = draft.Proteins,
             Fats = draft.Fats,
             Carbs = draft.Carbs,
+            IsFixedServing = isFixedServing,
             ServingSize = draft.ServingSize,
             CreatedAt = _clock.UtcNow
         };
@@ -115,6 +121,19 @@ public sealed class FavoriteProductService : IFavoriteProductService
         _logger.LogInformation("Добавил в избранное продукт {ProductId} пользователя {UserId}", product.Id, userId);
 
         return (true, product);
+    }
+
+    public async Task<FavoriteProduct> SetFixedServingAsync(long userId, int favoriteId, bool isFixedServing, CancellationToken ct)
+    {
+        var product = await _db.FavoriteProducts
+                          .FirstOrDefaultAsync(p => p.UserId == userId && p.Id == favoriteId, ct)
+                      ?? throw new InvalidOperationException($"Продукт {favoriteId} пользователя {userId} не найден.");
+
+        product.IsFixedServing = isFixedServing;
+        await _db.SaveChangesAsync(ct);
+        Invalidate(userId);
+
+        return product;
     }
 
     public async Task<FavoriteProduct?> DeleteAsync(long userId, int favoriteId, CancellationToken ct)

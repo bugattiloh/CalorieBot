@@ -12,8 +12,8 @@ public interface IProgressService
     /// <summary>Считаю прогресс за текущий цикл (с <see cref="AppUser.CycleStartedAt"/>) и подбираю избранное, влезающее в остаток.</summary>
     Task<DailyProgress> GetCurrentCycleAsync(long userId, CancellationToken ct);
 
-    /// <summary>Только избранное, которое вписывается в остаток лимита.</summary>
-    Task<IReadOnlyList<FavoriteProduct>> GetFittingFavoritesAsync(long userId, int remainingCalories, CancellationToken ct);
+    /// <summary>Только избранное, которое вписывается в остаток по правилам <paramref name="progress"/> (см. <see cref="DailyProgress.Fits"/>).</summary>
+    Task<IReadOnlyList<FavoriteProduct>> GetFittingFavoritesAsync(long userId, DailyProgress progress, CancellationToken ct);
 }
 
 /// <inheritdoc />
@@ -58,14 +58,12 @@ public sealed class ProgressService : IProgressService
             })
             .FirstOrDefaultAsync(ct);
 
-        var consumed = totals?.Calories ?? 0;
-        var remaining = Math.Max(0, user.DailyCalorieLimit - consumed);
-
-        return new DailyProgress
+        var progressWithoutFavorites = new DailyProgress
         {
             CycleStartedAt = cycleStart,
+            TrackingMode = user.TrackingMode,
             CalorieLimit = user.DailyCalorieLimit,
-            ConsumedCalories = consumed,
+            ConsumedCalories = totals?.Calories ?? 0,
             Proteins = totals?.Proteins ?? 0m,
             Fats = totals?.Fats ?? 0m,
             Carbs = totals?.Carbs ?? 0m,
@@ -73,29 +71,29 @@ public sealed class ProgressService : IProgressService
             FatsLimit = user.DailyFatsLimit,
             CarbsLimit = user.DailyCarbsLimit,
             EntriesCount = totals?.Count ?? 0,
-            CycleElapsed = _clock.UtcNow - cycleStart,
-            FittingFavorites = await GetFittingFavoritesAsync(userId, remaining, ct)
+            CycleElapsed = _clock.UtcNow - cycleStart
+        };
+
+        return progressWithoutFavorites with
+        {
+            FittingFavorites = await GetFittingFavoritesAsync(userId, progressWithoutFavorites, ct)
         };
     }
 
     public async Task<IReadOnlyList<FavoriteProduct>> GetFittingFavoritesAsync(
         long userId,
-        int remainingCalories,
+        DailyProgress progress,
         CancellationToken ct)
     {
-        if (remainingCalories <= 0)
-        {
-            return Array.Empty<FavoriteProduct>();
-        }
-
         var favorites = await _favorites.GetAllAsync(userId, ct);
+        var fitting = favorites.Where(progress.Fits);
 
-        // Сначала самые калорийные из подходящих: их сложнее «уместить» позже в течение дня.
-        return favorites
-            .Where(p => p.Calories <= remainingCalories)
-            .OrderByDescending(p => p.Calories)
-            .ThenBy(p => p.Name)
-            .Take(MaxFittingFavorites)
-            .ToList();
+        // В режиме БЖУ сортирую по суммарному весу нутриентов, в режиме калорий — по калориям:
+        // в обоих случаях сначала показываю то, что сложнее «уместить» позже в цикле.
+        fitting = progress.TrackingMode == CalorieTrackingMode.Macros
+            ? fitting.OrderByDescending(p => p.Proteins + p.Fats + p.Carbs).ThenBy(p => p.Name)
+            : fitting.OrderByDescending(p => p.Calories).ThenBy(p => p.Name);
+
+        return fitting.Take(MaxFittingFavorites).ToList();
     }
 }

@@ -1,4 +1,5 @@
 using CalorieBot.Core.Services;
+using CalorieBot.Data.Entities;
 using CalorieBot.Tests.TestSupport;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -99,6 +100,35 @@ public class UserServiceTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => service.UpdateCalorieLimitAsync(userId: 999, newLimit: 1800, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task UpdateMacroLimitsAsync_SetsExactMacrosAndSwitchesMode()
+    {
+        var service = CreateService(out _);
+        await service.GetOrCreateAsync(1, null, null, CancellationToken.None);
+
+        var updated = await service.UpdateMacroLimitsAsync(1, proteins: 150, fats: 60, carbs: 250, CancellationToken.None);
+
+        Assert.Equal(CalorieTrackingMode.Macros, updated.TrackingMode);
+        Assert.Equal(150, updated.DailyProteinsLimit);
+        Assert.Equal(60, updated.DailyFatsLimit);
+        Assert.Equal(250, updated.DailyCarbsLimit);
+        // 150*4 + 60*9 + 250*4 = 600 + 540 + 1000 = 2140
+        Assert.Equal(2140, updated.DailyCalorieLimit);
+    }
+
+    [Fact]
+    public async Task UpdateCalorieLimitAsync_SwitchesModeBackToCalories_AfterMacroMode()
+    {
+        var service = CreateService(out _);
+        await service.GetOrCreateAsync(1, null, null, CancellationToken.None);
+        await service.UpdateMacroLimitsAsync(1, 150, 60, 250, CancellationToken.None);
+
+        var updated = await service.UpdateCalorieLimitAsync(1, 1800, CancellationToken.None);
+
+        Assert.Equal(CalorieTrackingMode.Calories, updated.TrackingMode);
+        Assert.Equal(1800, updated.DailyCalorieLimit);
     }
 
     [Fact]

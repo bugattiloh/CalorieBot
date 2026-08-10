@@ -11,7 +11,6 @@ public static class Buttons
     public const string Progress = "📊 Мой прогресс";
     public const string Favorites = "⭐ Любимые продукты";
     public const string Limit = "🎯 Дневной лимит";
-    public const string History = "📋 Текущий цикл";
     public const string NewDay = "🆕 Новый день";
     public const string CycleHistory = "📅 Прошлые циклы";
 
@@ -25,7 +24,7 @@ public static class Buttons
     public const string DeleteFavorite = "🗑 Удалить из избранного";
 
     // Подменю «Дневной лимит».
-    public const string ChangeLimit = "✏️ Изменить лимит калорий";
+    public const string ChangeLimit = "✏️ Изменить лимит";
     public const string CurrentLimit = "📊 Текущий лимит";
 
     // Общая кнопка возврата из любого подменю.

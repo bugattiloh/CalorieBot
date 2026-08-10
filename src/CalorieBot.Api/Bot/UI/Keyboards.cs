@@ -16,8 +16,7 @@ public static class Keyboards
     {
         new KeyboardButton[] { Buttons.AddMeal, Buttons.Progress },
         new KeyboardButton[] { Buttons.Favorites, Buttons.Limit },
-        new KeyboardButton[] { Buttons.History, Buttons.NewDay },
-        new KeyboardButton[] { Buttons.CycleHistory }
+        new KeyboardButton[] { Buttons.NewDay, Buttons.CycleHistory }
     })
     {
         ResizeKeyboard = true,
@@ -75,14 +74,35 @@ public static class Keyboards
         new[] { InlineKeyboardButton.WithCallbackData("🔙 В меню", Callbacks.ToMenu) }
     });
 
-    /// <summary>
-    /// Выбор режима ввода БЖУ. <paramref name="action"/> — <see cref="Callbacks.MealMacrosMode"/>
-    /// или <see cref="Callbacks.FavoriteMacrosMode"/>, в зависимости от того, где идёт диалог.
-    /// </summary>
+    /// <summary>Выбор режима ввода БЖУ для записи в дневник (<see cref="Callbacks.MealMacrosMode"/>).</summary>
     public static InlineKeyboardMarkup MacrosModeChoice(string action) => new(new[]
     {
         new[] { InlineKeyboardButton.WithCallbackData("📏 На 100 г продукта", Callbacks.Build(action, "100")) },
         new[] { InlineKeyboardButton.WithCallbackData("🍽 На порцию целиком", Callbacks.Build(action, "full")) }
+    });
+
+    /// <summary>
+    /// Выбор типа порции для избранного — та же механика (100/full), что и <see cref="MacrosModeChoice"/>,
+    /// но формулировка подчёркивает, что это постоянное свойство продукта, а не разовое удобство ввода.
+    /// </summary>
+    public static InlineKeyboardMarkup FavoriteServingModeChoice { get; } = new(new[]
+    {
+        new[] { InlineKeyboardButton.WithCallbackData("🍽 Фиксированная порция", Callbacks.Build(Callbacks.FavoriteMacrosMode, "full")) },
+        new[] { InlineKeyboardButton.WithCallbackData("📏 На 100 г (порция плавающая)", Callbacks.Build(Callbacks.FavoriteMacrosMode, "100")) }
+    });
+
+    /// <summary>Действия в карточке избранного продукта.</summary>
+    public static InlineKeyboardMarkup FavoriteDetailsActions(int favoriteId, bool isFixedServing) => new(new[]
+    {
+        new[] { InlineKeyboardButton.WithCallbackData("✏️ Изменить КБЖУ", Callbacks.Build(Callbacks.FavoriteEditMacros, favoriteId)) },
+        new[]
+        {
+            InlineKeyboardButton.WithCallbackData(
+                isFixedServing ? "🔁 Сделать порцию плавающей" : "🔁 Сделать порцию фиксированной",
+                Callbacks.Build(Callbacks.FavoriteToggleFixed, favoriteId))
+        },
+        new[] { InlineKeyboardButton.WithCallbackData("🗑 Удалить", Callbacks.Build(Callbacks.DeleteFavorite, favoriteId)) },
+        new[] { InlineKeyboardButton.WithCallbackData("◀️ К списку", Callbacks.Build(Callbacks.ListPage, 0)) }
     });
 
     /// <summary>Предложение сохранить только что введённый продукт в избранное.</summary>
@@ -116,6 +136,13 @@ public static class Keyboards
     public static InlineKeyboardMarkup SkipServingSize { get; } = new(new[]
     {
         new[] { InlineKeyboardButton.WithCallbackData("⏭ Пропустить", Callbacks.SkipServing) }
+    });
+
+    /// <summary>Выбор режима отслеживания лимита: по калориям или по БЖУ.</summary>
+    public static InlineKeyboardMarkup LimitModeChoice { get; } = new(new[]
+    {
+        new[] { InlineKeyboardButton.WithCallbackData("📐 По калориям", Callbacks.Build(Callbacks.LimitMode, "cal")) },
+        new[] { InlineKeyboardButton.WithCallbackData("🥩 По БЖУ", Callbacks.Build(Callbacks.LimitMode, "macro")) }
     });
 
     /// <summary>Подтверждение начала нового дня — сброс цикла случайным тапом быть не должен.</summary>

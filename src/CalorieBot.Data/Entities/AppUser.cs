@@ -14,12 +14,23 @@ public class AppUser
     public string? FirstName { get; set; }
 
     /// <summary>
+    /// Что пользователь отслеживает: калории (лимиты БЖУ — справочные, посчитаны как 30/30/40 % от калорий)
+    /// или сами БЖУ (лимиты заданы явно, калории — расчётные из них). Управляется через «🎯 Дневной лимит».
+    /// </summary>
+    public CalorieTrackingMode TrackingMode { get; set; } = CalorieTrackingMode.Calories;
+
+    /// <summary>
     /// Дневной максимум калорий. Живёт до тех пор, пока пользователь сам его не заменит,
-    /// поэтому никакого сброса этого поля по расписанию у меня нет.
+    /// поэтому никакого сброса этого поля по расписанию у меня нет. В режиме <see cref="CalorieTrackingMode.Macros"/>
+    /// это значение — производное от заданных БЖУ, а не то, что пользователь вводил напрямую.
     /// </summary>
     public int DailyCalorieLimit { get; set; } = 2000;
 
-    /// <summary>Ориентиры по БЖУ. Пересчитываю их от лимита калорий как 30/30/40 %.</summary>
+    /// <summary>
+    /// Ориентиры по БЖУ. В режиме <see cref="CalorieTrackingMode.Calories"/> — 30/30/40 % от лимита калорий
+    /// (справочно, без собственного лимита). В режиме <see cref="CalorieTrackingMode.Macros"/> — то, что
+    /// пользователь ввёл напрямую как жёсткий лимит.
+    /// </summary>
     public decimal? DailyProteinsLimit { get; set; }
 
     public decimal? DailyFatsLimit { get; set; }

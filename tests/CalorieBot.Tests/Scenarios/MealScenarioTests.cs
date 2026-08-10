@@ -43,6 +43,7 @@ public class MealScenarioTests
     private static DailyProgress EmptyProgress(int limit = 2000) => new()
     {
         CycleStartedAt = new DateTime(2026, 8, 8, 0, 0, 0, DateTimeKind.Utc),
+        TrackingMode = CalorieTrackingMode.Calories,
         CalorieLimit = limit,
         ConsumedCalories = 0
     };

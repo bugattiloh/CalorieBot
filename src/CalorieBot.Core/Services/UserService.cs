@@ -17,8 +17,14 @@ public interface IUserService
     /// <summary>Отдаю профиль (по возможности из кэша).</summary>
     Task<AppUser> GetAsync(long userId, CancellationToken ct);
 
-    /// <summary>Меняю дневной максимум калорий и пересчитываю ориентиры по БЖУ.</summary>
+    /// <summary>Меняю дневной максимум калорий (переключает в режим <see cref="CalorieTrackingMode.Calories"/>) и пересчитываю справочные ориентиры по БЖУ.</summary>
     Task<AppUser> UpdateCalorieLimitAsync(long userId, int newLimit, CancellationToken ct);
+
+    /// <summary>
+    /// Задаю лимиты БЖУ напрямую (переключает в режим <see cref="CalorieTrackingMode.Macros"/>) —
+    /// калории при этом становятся расчётной величиной от этих БЖУ, а не наоборот.
+    /// </summary>
+    Task<AppUser> UpdateMacroLimitsAsync(long userId, decimal proteins, decimal fats, decimal carbs, CancellationToken ct);
 
     /// <summary>
     /// Сдвигаю начало текущего цикла подсчёта КБЖУ на <paramref name="startedAt"/> (обычно «сейчас»)
@@ -134,6 +140,7 @@ public sealed class UserService : IUserService
 
         var macros = CalorieCalculator.SplitLimitToMacros(newLimit);
 
+        user.TrackingMode = CalorieTrackingMode.Calories;
         user.DailyCalorieLimit = newLimit;
         user.DailyProteinsLimit = macros.Proteins;
         user.DailyFatsLimit = macros.Fats;
@@ -143,6 +150,26 @@ public sealed class UserService : IUserService
 
         await _db.SaveChangesAsync(ct);
         _logger.LogInformation("Пользователь {UserId} сменил дневной лимит на {Limit} ккал", userId, newLimit);
+
+        return Cache(user);
+    }
+
+    public async Task<AppUser> UpdateMacroLimitsAsync(long userId, decimal proteins, decimal fats, decimal carbs, CancellationToken ct)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.UserId == userId, ct)
+                   ?? throw new InvalidOperationException($"Пользователь {userId} не найден.");
+
+        user.TrackingMode = CalorieTrackingMode.Macros;
+        user.DailyProteinsLimit = proteins;
+        user.DailyFatsLimit = fats;
+        user.DailyCarbsLimit = carbs;
+        // Калории — не то, что вводил пользователь, но храню посчитанными: используются как справочная величина.
+        user.DailyCalorieLimit = CalorieCalculator.FromMacros(proteins, fats, carbs);
+        user.GoalSetAt = _clock.UtcNow;
+
+        await _db.SaveChangesAsync(ct);
+        _logger.LogInformation(
+            "Пользователь {UserId} сменил лимит на БЖУ {Proteins}/{Fats}/{Carbs} г", userId, proteins, fats, carbs);
 
         return Cache(user);
     }
@@ -169,6 +196,7 @@ public sealed class UserService : IUserService
             UserId = user.UserId,
             Username = user.Username,
             FirstName = user.FirstName,
+            TrackingMode = user.TrackingMode,
             DailyCalorieLimit = user.DailyCalorieLimit,
             DailyProteinsLimit = user.DailyProteinsLimit,
             DailyFatsLimit = user.DailyFatsLimit,

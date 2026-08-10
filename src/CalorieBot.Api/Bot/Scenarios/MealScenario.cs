@@ -74,13 +74,13 @@ public sealed class MealScenario
         var progress = await _progress.GetCurrentCycleAsync(userId, ct);
         var text = Texts.PickFavoriteHeader(progress, favorites.Count);
 
-        // Продукты, которые уже не влезают в остаток лимита, помечаю — но выбрать их не запрещаю.
+        // Продукты, которые уже не влезают в остаток, помечаю — но выбрать их не запрещаю.
         var keyboard = Keyboards.ProductPage(
             favorites,
             page,
             Callbacks.PickFavorite,
             Callbacks.PickFavoritePage,
-            product => Texts.ProductButtonLabel(product, product.Calories <= progress.RemainingCalories));
+            product => Texts.ProductButtonLabel(product, progress.Fits(product)));
 
         var context = _states.Get(userId);
 
@@ -96,7 +96,10 @@ public sealed class MealScenario
         }
     }
 
-    /// <summary>Пользователь выбрал продукт из избранного — остаётся указать тип приёма пищи.</summary>
+    /// <summary>
+    /// Пользователь выбрал продукт из избранного. С фиксированной порцией — остаётся указать тип приёма пищи.
+    /// С плавающей порцией (например, рис) — сначала спрашиваю, сколько съедено, чтобы пересчитать КБЖУ.
+    /// </summary>
     public async Task HandleFavoritePickedAsync(CallbackQuery query, string? argument, CancellationToken ct)
     {
         if (query.Message is null || !int.TryParse(argument, out var favoriteId))
@@ -116,9 +119,25 @@ public sealed class MealScenario
 
         var context = _states.Get(userId);
         context.Reset();
-        context.Apply(ProductDraft.FromFavorite(favorite));
         context.FavoriteProductId = favorite.Id;
         context.ActiveInlineMessageId = query.Message.MessageId;
+
+        if (!favorite.IsFixedServing)
+        {
+            // КБЖУ у такого избранного хранятся на 100 г — прежде чем считать, узнаю фактический вес порции.
+            context.ProductName = favorite.Name;
+            context.Proteins = favorite.Proteins;
+            context.Fats = favorite.Fats;
+            context.Carbs = favorite.Carbs;
+            context.MacrosPerHundredGrams = true;
+            context.State = ConversationState.AwaitingMealServingGrams;
+
+            await _messenger.AnswerAsync(query, ct: ct);
+            await _messenger.EditAsync(query.Message.Chat.Id, query.Message.MessageId, Texts.AskServingGrams, replyMarkup: null, ct);
+            return;
+        }
+
+        context.Apply(ProductDraft.FromFavorite(favorite));
 
         await _messenger.AnswerAsync(query, ct: ct);
         await _messenger.EditAsync(
@@ -248,6 +267,18 @@ public sealed class MealScenario
             Math.Round(context.Carbs * scale, 1),
             servingSize: $"{grams} г");
 
+        if (context.FavoriteProductId.HasValue)
+        {
+            // Вес спрашивал для уже существующего избранного — сохранять его повторно не нужно,
+            // сразу перехожу к выбору приёма пищи.
+            context.Apply(draft);
+            context.State = ConversationState.Idle;
+
+            var sent = await _messenger.SendAsync(chatId, Texts.ChooseMealType(draft), Keyboards.MealTypes, ct);
+            context.ActiveInlineMessageId = sent.MessageId;
+            return;
+        }
+
         await OfferToSaveFavoriteAsync(chatId, context, draft, ct);
     }
 
@@ -290,7 +321,8 @@ public sealed class MealScenario
 
         if (save)
         {
-            var (created, product) = await _favorites.AddOrUpdateAsync(userId, context.ToDraft(), ct);
+            // Продукт уже съеден именно в этом количестве — сохраняю как фиксированную порцию.
+            var (created, product) = await _favorites.AddOrUpdateAsync(userId, context.ToDraft(), isFixedServing: true, ct);
             context.FavoriteProductId = product.Id;
             answer = created ? "Добавил в избранное ⭐" : "Обновил продукт в избранном ⭐";
         }

@@ -6,8 +6,8 @@ using CalorieBot.Core.Time;
 namespace CalorieBot.Api.Bot.Scenarios;
 
 /// <summary>
-/// Сценарии просмотра: «📊 Мой прогресс» и «📋 Текущий цикл».
-/// Оба экрана только читают данные, поэтому состояние диалога здесь сбрасываю.
+/// Сценарий «📊 Мой прогресс»: прогресс текущего цикла и сразу его история одним сообщением.
+/// Экран только читает данные, поэтому состояние диалога здесь сбрасываю.
 /// </summary>
 public sealed class ProgressScenario
 {
@@ -31,27 +31,14 @@ public sealed class ProgressScenario
         _clock = clock;
     }
 
-    /// <summary>Главный экран: лимит, съеденное, остаток и подходящие любимые продукты.</summary>
+    /// <summary>Главный экран: лимит/БЖУ, остаток, подходящие любимые продукты и история цикла.</summary>
     public async Task ShowProgressAsync(long chatId, long userId, CancellationToken ct)
     {
         _states.Get(userId).Reset();
 
         var progress = await _progress.GetCurrentCycleAsync(userId, ct);
-        await _messenger.SendAsync(chatId, Texts.Progress(progress, _clock.Offset), Keyboards.MainMenu, ct);
-    }
-
-    /// <summary>Что съедено в текущем цикле, с разбивкой по приёмам пищи.</summary>
-    public async Task ShowHistoryAsync(long chatId, long userId, CancellationToken ct)
-    {
-        _states.Get(userId).Reset();
-
         var entries = await _foodLog.GetCurrentCycleAsync(userId, ct);
-        var progress = await _progress.GetCurrentCycleAsync(userId, ct);
 
-        await _messenger.SendAsync(
-            chatId,
-            Texts.History(entries, progress, _clock.Offset),
-            Keyboards.MainMenu,
-            ct);
+        await _messenger.SendAsync(chatId, Texts.Progress(progress, entries, _clock.Offset), Keyboards.MainMenu, ct);
     }
 }

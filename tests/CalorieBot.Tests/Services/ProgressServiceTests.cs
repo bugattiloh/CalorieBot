@@ -89,8 +89,8 @@ public class ProgressServiceTests
         var h = CreateHarness();
         await h.Users.GetOrCreateAsync(1, null, null, CancellationToken.None); // лимит 2000
 
-        await h.Favorites.AddOrUpdateAsync(1, ProductDraft.FromMacros("Лёгкий перекус", 5, 2, 10), CancellationToken.None); // ~78 ккал
-        await h.Favorites.AddOrUpdateAsync(1, ProductDraft.FromMacros("Огромный бургер", 100, 100, 200), CancellationToken.None); // намного больше остатка
+        await h.Favorites.AddOrUpdateAsync(1, ProductDraft.FromMacros("Лёгкий перекус", 5, 2, 10), isFixedServing: true, CancellationToken.None); // ~78 ккал
+        await h.Favorites.AddOrUpdateAsync(1, ProductDraft.FromMacros("Огромный бургер", 100, 100, 200), isFixedServing: true, CancellationToken.None); // намного больше остатка
 
         await h.FoodLog.LogAsync(1, ProductDraft.FromMacros("Обед", 100, 50, 100), MealType.Lunch, null, CancellationToken.None); // ~1250 ккал, остаток < 1000
 
@@ -106,7 +106,7 @@ public class ProgressServiceTests
         var h = CreateHarness();
         await h.Users.GetOrCreateAsync(1, null, null, CancellationToken.None);
         await h.Users.UpdateCalorieLimitAsync(1, 500, CancellationToken.None);
-        await h.Favorites.AddOrUpdateAsync(1, ProductDraft.FromMacros("Дешёвый снек", 1, 1, 1), CancellationToken.None); // ~13 ккал
+        await h.Favorites.AddOrUpdateAsync(1, ProductDraft.FromMacros("Дешёвый снек", 1, 1, 1), isFixedServing: true, CancellationToken.None); // ~13 ккал
 
         await h.FoodLog.LogAsync(1, ProductDraft.FromMacros("Много еды", 50, 30, 60), MealType.Lunch, null, CancellationToken.None);
 
@@ -136,15 +136,40 @@ public class ProgressServiceTests
     }
 
     [Fact]
-    public async Task GetFittingFavoritesAsync_OrdersByCaloriesDescendingThenName()
+    public async Task GetFittingFavoritesAsync_CaloriesMode_OrdersByCaloriesDescendingThenName()
     {
         var h = CreateHarness();
-        await h.Favorites.AddOrUpdateAsync(1, ProductDraft.FromMacros("Б продукт", 10, 0, 0), CancellationToken.None); // 40 ккал
-        await h.Favorites.AddOrUpdateAsync(1, ProductDraft.FromMacros("А продукт", 10, 0, 0), CancellationToken.None); // 40 ккал, тот же лимит
-        await h.Favorites.AddOrUpdateAsync(1, ProductDraft.FromMacros("В продукт", 20, 0, 0), CancellationToken.None); // 80 ккал
+        await h.Favorites.AddOrUpdateAsync(1, ProductDraft.FromMacros("Б продукт", 10, 0, 0), isFixedServing: true, CancellationToken.None); // 40 ккал
+        await h.Favorites.AddOrUpdateAsync(1, ProductDraft.FromMacros("А продукт", 10, 0, 0), isFixedServing: true, CancellationToken.None); // 40 ккал, тот же лимит
+        await h.Favorites.AddOrUpdateAsync(1, ProductDraft.FromMacros("В продукт", 20, 0, 0), isFixedServing: true, CancellationToken.None); // 80 ккал
 
-        var fitting = await h.Progress.GetFittingFavoritesAsync(1, remainingCalories: 100, CancellationToken.None);
+        var progress = new DailyProgress
+        {
+            CycleStartedAt = h.Clock.UtcNow,
+            TrackingMode = CalorieTrackingMode.Calories,
+            CalorieLimit = 100,
+            ConsumedCalories = 0
+        };
+
+        var fitting = await h.Progress.GetFittingFavoritesAsync(1, progress, CancellationToken.None);
 
         Assert.Equal(new[] { "В продукт", "А продукт", "Б продукт" }, fitting.Select(p => p.Name));
+    }
+
+    [Fact]
+    public async Task GetCurrentCycleAsync_MacrosMode_FittingFavorites_RequiresAllThreeNutrientsToFit()
+    {
+        var h = CreateHarness();
+        await h.Users.GetOrCreateAsync(1, null, null, CancellationToken.None);
+        await h.Users.UpdateMacroLimitsAsync(1, proteins: 100, fats: 50, carbs: 200, CancellationToken.None);
+
+        await h.Favorites.AddOrUpdateAsync(1, ProductDraft.FromMacros("Влезает", 20, 10, 30), isFixedServing: true, CancellationToken.None);
+        await h.Favorites.AddOrUpdateAsync(1, ProductDraft.FromMacros("Слишком жирный", 5, 60, 5), isFixedServing: true, CancellationToken.None);
+
+        var progress = await h.Progress.GetCurrentCycleAsync(1, CancellationToken.None);
+
+        Assert.Equal(CalorieTrackingMode.Macros, progress.TrackingMode);
+        Assert.Contains(progress.FittingFavorites, p => p.Name == "Влезает");
+        Assert.DoesNotContain(progress.FittingFavorites, p => p.Name == "Слишком жирный");
     }
 }

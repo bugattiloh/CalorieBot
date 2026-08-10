@@ -24,6 +24,15 @@ public static class Callbacks
     /// <summary>Листание списка «Мои продукты»: lfp:{page}.</summary>
     public const string ListPage = "lfp";
 
+    /// <summary>Открыть карточку продукта в «Мои продукты»: fd:{id}.</summary>
+    public const string FavoriteDetails = "fd";
+
+    /// <summary>Изменить КБЖУ у уже сохранённого продукта: fem:{id}.</summary>
+    public const string FavoriteEditMacros = "fem";
+
+    /// <summary>Переключить тип порции (фиксированная / на 100 г) без изменения КБЖУ: fet:{id}.</summary>
+    public const string FavoriteToggleFixed = "fet";
+
     /// <summary>Листание списка удаления: dfp:{page}.</summary>
     public const string DeletePage = "dfp";
 
@@ -53,6 +62,9 @@ public static class Callbacks
 
     /// <summary>Листание истории прошлых циклов: chp:{page}.</summary>
     public const string CycleHistoryPage = "chp";
+
+    /// <summary>Выбран режим отслеживания лимита: lm:cal или lm:macro.</summary>
+    public const string LimitMode = "lm";
 
     /// <summary>Кнопка-заглушка (например, счётчик страниц) — ничего не делает.</summary>
     public const string Noop = "noop";

@@ -8,10 +8,11 @@ using CalorieBot.Tests.TestSupport;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Telegram.Bot.Types;
 
 namespace CalorieBot.Tests.Scenarios;
 
-/// <summary>Сценарий «🎯 Дневной лимит»: просмотр и изменение дневного максимума калорий.</summary>
+/// <summary>Сценарий «🎯 Дневной лимит»: просмотр и изменение дневного лимита по калориям или по БЖУ.</summary>
 public class LimitScenarioTests
 {
     private const long ChatId = 100;
@@ -46,6 +47,7 @@ public class LimitScenarioTests
     private static DailyProgress BuildProgress(int limit, int consumed) => new()
     {
         CycleStartedAt = new DateTime(2026, 8, 8, 0, 0, 0, DateTimeKind.Utc),
+        TrackingMode = CalorieTrackingMode.Calories,
         CalorieLimit = limit,
         ConsumedCalories = consumed
     };
@@ -65,14 +67,73 @@ public class LimitScenarioTests
     }
 
     [Fact]
-    public async Task StartChangeAsync_AwaitsNewLimitValue()
+    public async Task StartChangeAsync_AsksTrackingMode()
+    {
+        var h = CreateHarness();
+
+        await h.Scenario.StartChangeAsync(ChatId, UserId, CancellationToken.None);
+
+        Assert.Equal(ConversationState.AwaitingLimitMode, h.States.Get(UserId).State);
+        Assert.Single(h.Bot.Sent);
+    }
+
+    [Fact]
+    public async Task HandleLimitModeAsync_WithCalories_AwaitsCalorieLimit()
     {
         var h = CreateHarness();
         h.Users.Setup(u => u.GetAsync(UserId, It.IsAny<CancellationToken>())).ReturnsAsync(BuildUser());
 
-        await h.Scenario.StartChangeAsync(ChatId, UserId, CancellationToken.None);
+        var query = BuildCallbackQuery("lm:cal");
+        await h.Scenario.HandleLimitModeAsync(query, argument: "cal", CancellationToken.None);
 
         Assert.Equal(ConversationState.AwaitingCalorieLimit, h.States.Get(UserId).State);
+        Assert.Single(h.Bot.Edited);
+    }
+
+    [Fact]
+    public async Task HandleLimitModeAsync_WithMacro_AwaitsMacroLimits()
+    {
+        var h = CreateHarness();
+
+        var query = BuildCallbackQuery("lm:macro");
+        await h.Scenario.HandleLimitModeAsync(query, argument: "macro", CancellationToken.None);
+
+        Assert.Equal(ConversationState.AwaitingMacroLimits, h.States.Get(UserId).State);
+        Assert.Single(h.Bot.Edited);
+    }
+
+    [Fact]
+    public async Task HandleNewMacroLimitsAsync_WithValidNumbers_UpdatesLimitsAndReturnsToIdle()
+    {
+        var h = CreateHarness();
+        h.States.Get(UserId).State = ConversationState.AwaitingMacroLimits;
+        var macroUser = BuildUser();
+        macroUser.TrackingMode = CalorieTrackingMode.Macros;
+        macroUser.DailyProteinsLimit = 150;
+        macroUser.DailyFatsLimit = 60;
+        macroUser.DailyCarbsLimit = 250;
+        h.Users.Setup(u => u.UpdateMacroLimitsAsync(UserId, 150, 60, 250, It.IsAny<CancellationToken>())).ReturnsAsync(macroUser);
+        h.Progress.Setup(p => p.GetCurrentCycleAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildProgress(2000, 400) with { TrackingMode = CalorieTrackingMode.Macros });
+
+        await h.Scenario.HandleNewMacroLimitsAsync(ChatId, UserId, "150 60 250", CancellationToken.None);
+
+        h.Users.Verify(u => u.UpdateMacroLimitsAsync(UserId, 150, 60, 250, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(ConversationState.Idle, h.States.Get(UserId).State);
+        Assert.Single(h.Bot.Sent);
+    }
+
+    [Fact]
+    public async Task HandleNewMacroLimitsAsync_WithInvalidInput_DoesNotCallUpdate()
+    {
+        var h = CreateHarness();
+        h.States.Get(UserId).State = ConversationState.AwaitingMacroLimits;
+
+        await h.Scenario.HandleNewMacroLimitsAsync(ChatId, UserId, "не число", CancellationToken.None);
+
+        h.Users.Verify(u => u.UpdateMacroLimitsAsync(It.IsAny<long>(), It.IsAny<decimal>(), It.IsAny<decimal>(), It.IsAny<decimal>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(ConversationState.AwaitingMacroLimits, h.States.Get(UserId).State);
+        Assert.Single(h.Bot.Sent);
     }
 
     [Fact]
@@ -117,4 +178,12 @@ public class LimitScenarioTests
         Assert.Single(h.Bot.Sent);
         Assert.Contains("2000", h.Bot.Sent[0].Text);
     }
+
+    private static CallbackQuery BuildCallbackQuery(string data) => new()
+    {
+        Id = "cb-1",
+        From = new User { Id = UserId, FirstName = "Test" },
+        Message = new Message { Id = 55, Chat = new Chat { Id = ChatId } },
+        Data = data
+    };
 }

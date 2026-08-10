@@ -13,13 +13,6 @@ namespace CalorieBot.Api.Bot.UI;
 /// </summary>
 public static class Texts
 {
-    /// <summary>Названия месяцев держу своим списком, чтобы не зависеть от наличия ICU в контейнере.</summary>
-    private static readonly string[] MonthsGenitive =
-    {
-        "января", "февраля", "марта", "апреля", "мая", "июня",
-        "июля", "августа", "сентября", "октября", "ноября", "декабря"
-    };
-
     public const string OnlyButtons =
         "Я понимаю только кнопки 🙂\nВыберите действие в меню ниже.";
 
@@ -42,6 +35,13 @@ public static class Texts
         "Как вам удобнее указать БЖУ?\n\n" +
         "📏 <b>На 100 г</b> — я потом спрошу вес порции и сам пересчитаю на неё.\n" +
         "🍽 <b>На порцию целиком</b> — введённые числа так и запишу.";
+
+    /// <summary>Выбор типа порции для избранного — от него зависит, как продукт логируется в дневник.</summary>
+    public const string AskFavoriteServingMode =
+        "Какая у продукта порция?\n\n" +
+        "🍽 <b>Фиксированная</b> (например, батончик) — КБЖУ на одну порцию, добавляется в дневник одним тапом.\n" +
+        "📏 <b>На 100 г</b> (например, рис) — порция каждый раз разная, при добавлении в дневник я буду " +
+        "спрашивать съеденный вес и пересчитывать КБЖУ на него.";
 
     public const string AskMacros =
         "Теперь пришлите БЖУ <b>на порцию</b> в граммах — три числа в порядке <b>белки жиры углеводы</b>.\n\n" +
@@ -81,12 +81,12 @@ public static class Texts
         builder.AppendLine();
         builder.AppendLine("Всё управление — кнопками ниже:");
         builder.AppendLine("🍽 записать съеденное");
-        builder.AppendLine("📊 посмотреть, сколько ещё можно");
+        builder.AppendLine("📊 посмотреть прогресс и историю текущего цикла");
         builder.AppendLine("⭐ хранить любимые продукты");
-        builder.AppendLine("🎯 менять дневной максимум");
-        builder.AppendLine("📋 смотреть, что съедено сегодня");
+        builder.AppendLine("🎯 менять дневной лимит (по калориям или по БЖУ)");
+        builder.AppendLine("🆕 начать новый день, когда сами решите");
         builder.AppendLine();
-        builder.Append("<i>Счётчик обнуляется в полночь по московскому времени (UTC+3).</i>");
+        builder.Append("<i>Автосброса по расписанию нет — счётчик обнуляется только по кнопке «🆕 Новый день».</i>");
 
         return builder.ToString();
     }
@@ -101,14 +101,42 @@ public static class Texts
                $"Б {Num(draft.Proteins)} · Ж {Num(draft.Fats)} · У {Num(draft.Carbs)} г";
     }
 
-    /// <summary>Главный экран прогресса.</summary>
-    public static string Progress(DailyProgress progress, TimeSpan offset)
+    /// <summary>
+    /// Главный экран: прогресс текущего цикла (по калориям либо по БЖУ — смотря что отслеживает
+    /// пользователь) плюс сразу история цикла, без отдельного экрана.
+    /// </summary>
+    public static string Progress(DailyProgress progress, IReadOnlyList<FoodLogEntry> entries, TimeSpan offset)
     {
-        var builder = new StringBuilder();
-
         var cycleStart = new DateTimeOffset(DateTime.SpecifyKind(progress.CycleStartedAt, DateTimeKind.Utc)).ToOffset(offset);
+
+        var builder = new StringBuilder();
         builder.AppendLine("📊 <b>Мой прогресс</b>");
         builder.AppendLine();
+
+        if (progress.TrackingMode == CalorieTrackingMode.Macros)
+        {
+            AppendMacroProgress(builder, progress);
+        }
+        else
+        {
+            AppendCalorieProgress(builder, progress);
+        }
+
+        builder.AppendLine();
+        builder.AppendLine($"Приёмов пищи в этом цикле: <b>{progress.EntriesCount}</b>");
+        builder.AppendLine($"Цикл идёт: {Duration(progress.CycleElapsed)} (с {cycleStart:dd.MM HH:mm})");
+        builder.AppendLine();
+
+        AppendFittingFavorites(builder, progress);
+        builder.AppendLine();
+        builder.AppendLine();
+        AppendCycleHistory(builder, entries, offset);
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private static void AppendCalorieProgress(StringBuilder builder, DailyProgress progress)
+    {
         builder.AppendLine($"Съедено <b>{progress.ConsumedCalories}</b> из <b>{progress.CalorieLimit}</b> ккал ({progress.PercentUsed}% от лимита).");
 
         if (progress.IsExceeded)
@@ -129,71 +157,69 @@ public static class Texts
         builder.AppendLine(MacroLine("🥩 Б", progress.Proteins, progress.ProteinsLimit));
         builder.AppendLine(MacroLine("🧈 Ж", progress.Fats, progress.FatsLimit));
         builder.AppendLine(MacroLine("🍞 У", progress.Carbs, progress.CarbsLimit));
-        builder.AppendLine();
-        builder.AppendLine($"Приёмов пищи в этом цикле: <b>{progress.EntriesCount}</b>");
-        builder.AppendLine($"Цикл идёт: {Duration(progress.CycleElapsed)} (с {cycleStart:dd.MM HH:mm})");
-        builder.AppendLine();
-
-        if (progress.IsExceeded || progress.RemainingCalories == 0)
-        {
-            builder.Append("💝 Лимит на сегодня исчерпан, подходящих продуктов не показываю.");
-        }
-        else if (progress.FittingFavorites.Count == 0)
-        {
-            builder.Append($"💝 Из избранного в остаток <b>{progress.RemainingCalories} ккал</b> пока ничего не вписывается.");
-        }
-        else
-        {
-            builder.AppendLine($"💝 <b>Можно съесть из любимого</b> (до {progress.RemainingCalories} ккал):");
-            foreach (var product in progress.FittingFavorites)
-            {
-                builder.AppendLine($"• {FavoriteLine(product)}");
-            }
-        }
-
-        return builder.ToString().TrimEnd();
     }
 
-    /// <summary>Ответ после записи приёма пищи: что записал и что стало с лимитом.</summary>
-    public static string MealLogged(FoodLogEntry entry, DailyProgress progress)
+    private static void AppendMacroProgress(StringBuilder builder, DailyProgress progress)
     {
-        var serving = string.IsNullOrWhiteSpace(entry.ServingSize) ? string.Empty : $" ({Escape(entry.ServingSize!)})";
-        var builder = new StringBuilder();
-
-        builder.AppendLine($"✅ Записал: <b>{Escape(entry.ProductName)}</b>{serving}");
-        builder.AppendLine($"{MealTypeName(entry.MealType)} · <b>{entry.Calories} ккал</b>");
-        builder.AppendLine($"Б {Num(entry.Proteins)} · Ж {Num(entry.Fats)} · У {Num(entry.Carbs)} г");
+        builder.AppendLine($"Калорийность съеденного: <b>{progress.ConsumedCalories} ккал</b> <i>(справочно — вы отслеживаете БЖУ)</i>.");
         builder.AppendLine();
-        builder.AppendLine($"Съедено <b>{progress.ConsumedCalories}</b> из <b>{progress.CalorieLimit}</b> ккал ({progress.PercentUsed}%).");
+        AppendMacroTargetLine(builder, "🥩 Белки", progress.Proteins, progress.ProteinsLimit, progress.ProteinsRemaining, progress.IsProteinsExceeded, progress.ProteinsExceededBy);
+        AppendMacroTargetLine(builder, "🧈 Жиры", progress.Fats, progress.FatsLimit, progress.FatsRemaining, progress.IsFatsExceeded, progress.FatsExceededBy);
+        AppendMacroTargetLine(builder, "🍞 Углеводы", progress.Carbs, progress.CarbsLimit, progress.CarbsRemaining, progress.IsCarbsExceeded, progress.CarbsExceededBy);
 
-        if (progress.IsExceeded)
+        if (progress.IsProteinsExceeded || progress.IsFatsExceeded || progress.IsCarbsExceeded)
         {
-            builder.AppendLine($"⚠️ <b>Лимит превышен на {progress.ExceededBy} ккал!</b>");
+            builder.AppendLine();
+            builder.Append("⚠️ Не забудьте: счётчик не обнулится сам — нажмите «🆕 Новый день», когда будете готовы.");
         }
-        else
-        {
-            builder.AppendLine($"Осталось: <b>{progress.RemainingCalories}</b> ккал");
-        }
-
-        builder.Append(ProgressBar(progress.PercentUsed));
-        return builder.ToString();
     }
 
-    /// <summary>История текущего цикла, сгруппированная по типам приёмов пищи.</summary>
-    public static string History(IReadOnlyList<FoodLogEntry> entries, DailyProgress progress, TimeSpan offset)
+    private static void AppendMacroTargetLine(
+        StringBuilder builder, string label, decimal consumed, decimal? limit, decimal remaining, bool isExceeded, decimal exceededBy)
     {
-        var cycleStart = new DateTimeOffset(DateTime.SpecifyKind(progress.CycleStartedAt, DateTimeKind.Utc)).ToOffset(offset);
+        if (limit is null or 0m)
+        {
+            builder.AppendLine($"{label}: {Num(consumed)} г");
+            return;
+        }
 
-        var builder = new StringBuilder();
-        builder.AppendLine($"📋 <b>История текущего цикла</b> (с {cycleStart:dd.MM HH:mm})");
+        var percent = (int)Math.Round(consumed * 100m / limit.Value, MidpointRounding.AwayFromZero);
+        var status = isExceeded ? $"⚠️ перебор на {Num(exceededBy)} г" : $"осталось {Num(remaining)} г";
+
+        builder.AppendLine($"{label}: {Num(consumed)} из {Num(limit.Value)} г ({percent}%) — {status}");
+        builder.AppendLine(ProgressBar(percent));
+    }
+
+    private static void AppendFittingFavorites(StringBuilder builder, DailyProgress progress)
+    {
+        if (progress.FittingFavorites.Count == 0)
+        {
+            builder.Append(progress.TrackingMode == CalorieTrackingMode.Macros
+                ? "💝 Из избранного пока ничего не вписывается в остаток по БЖУ."
+                : $"💝 Из избранного в остаток <b>{progress.RemainingCalories} ккал</b> пока ничего не вписывается.");
+            return;
+        }
+
+        builder.AppendLine(progress.TrackingMode == CalorieTrackingMode.Macros
+            ? "💝 <b>Можно съесть из любимого</b> (укладывается в остаток по БЖУ):"
+            : $"💝 <b>Можно съесть из любимого</b> (до {progress.RemainingCalories} ккал):");
+
+        foreach (var product in progress.FittingFavorites)
+        {
+            builder.AppendLine($"• {FavoriteLine(product)}");
+        }
+    }
+
+    /// <summary>Список того, что записано в текущем цикле, сгруппированный по типам приёмов пищи.</summary>
+    private static void AppendCycleHistory(StringBuilder builder, IReadOnlyList<FoodLogEntry> entries, TimeSpan offset)
+    {
+        builder.AppendLine("📋 <b>История цикла</b>");
         builder.AppendLine();
 
         if (entries.Count == 0)
         {
-            builder.AppendLine("В этом цикле вы ещё ничего не записали.");
-            builder.AppendLine();
-            builder.Append($"Дневной лимит: <b>{progress.CalorieLimit} ккал</b> — весь ваш.");
-            return builder.ToString();
+            builder.Append("Пока ничего не записано.");
+            return;
         }
 
         foreach (var group in entries.GroupBy(e => e.MealType).OrderBy(g => g.Key))
@@ -214,12 +240,39 @@ public static class Texts
 
             builder.AppendLine();
         }
+    }
 
-        builder.AppendLine($"Итого: <b>{progress.ConsumedCalories}</b> из <b>{progress.CalorieLimit}</b> ккал ({progress.PercentUsed}%).");
-        builder.Append(progress.IsExceeded
-            ? $"⚠️ <b>Лимит превышен на {progress.ExceededBy} ккал!</b>"
-            : $"Осталось: <b>{progress.RemainingCalories}</b> ккал");
+    /// <summary>Ответ после записи приёма пищи: что записал и что стало с лимитом.</summary>
+    public static string MealLogged(FoodLogEntry entry, DailyProgress progress)
+    {
+        var serving = string.IsNullOrWhiteSpace(entry.ServingSize) ? string.Empty : $" ({Escape(entry.ServingSize!)})";
+        var builder = new StringBuilder();
 
+        builder.AppendLine($"✅ Записал: <b>{Escape(entry.ProductName)}</b>{serving}");
+        builder.AppendLine($"{MealTypeName(entry.MealType)} · <b>{entry.Calories} ккал</b>");
+        builder.AppendLine($"Б {Num(entry.Proteins)} · Ж {Num(entry.Fats)} · У {Num(entry.Carbs)} г");
+        builder.AppendLine();
+
+        if (progress.TrackingMode == CalorieTrackingMode.Macros)
+        {
+            AppendMacroTargetLine(builder, "🥩 Белки", progress.Proteins, progress.ProteinsLimit, progress.ProteinsRemaining, progress.IsProteinsExceeded, progress.ProteinsExceededBy);
+            AppendMacroTargetLine(builder, "🧈 Жиры", progress.Fats, progress.FatsLimit, progress.FatsRemaining, progress.IsFatsExceeded, progress.FatsExceededBy);
+            AppendMacroTargetLine(builder, "🍞 Углеводы", progress.Carbs, progress.CarbsLimit, progress.CarbsRemaining, progress.IsCarbsExceeded, progress.CarbsExceededBy);
+            return builder.ToString().TrimEnd();
+        }
+
+        builder.AppendLine($"Съедено <b>{progress.ConsumedCalories}</b> из <b>{progress.CalorieLimit}</b> ккал ({progress.PercentUsed}%).");
+
+        if (progress.IsExceeded)
+        {
+            builder.AppendLine($"⚠️ <b>Лимит превышен на {progress.ExceededBy} ккал!</b>");
+        }
+        else
+        {
+            builder.AppendLine($"Осталось: <b>{progress.RemainingCalories}</b> ккал");
+        }
+
+        builder.Append(ProgressBar(progress.PercentUsed));
         return builder.ToString();
     }
 
@@ -276,14 +329,26 @@ public static class Texts
     public static string CurrentLimit(AppUser user, DailyProgress progress, TimeSpan offset)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("🎯 <b>Дневной максимум</b>");
+        builder.AppendLine("🎯 <b>Дневной лимит</b>");
         builder.AppendLine();
-        builder.AppendLine($"Лимит калорий: <b>{user.DailyCalorieLimit} ккал</b>");
 
-        if (user.DailyProteinsLimit is not null)
+        if (user.TrackingMode == CalorieTrackingMode.Macros)
         {
+            builder.AppendLine("Режим: <b>по БЖУ</b> 🥩");
             builder.AppendLine(
-                $"Ориентиры по БЖУ: {Num(user.DailyProteinsLimit.Value)} / {Num(user.DailyFatsLimit ?? 0m)} / {Num(user.DailyCarbsLimit ?? 0m)} г");
+                $"Лимиты: Б {Num(user.DailyProteinsLimit ?? 0m)} / Ж {Num(user.DailyFatsLimit ?? 0m)} / У {Num(user.DailyCarbsLimit ?? 0m)} г");
+            builder.AppendLine($"Это примерно <b>{user.DailyCalorieLimit} ккал</b> (справочно).");
+        }
+        else
+        {
+            builder.AppendLine("Режим: <b>по калориям</b> 📐");
+            builder.AppendLine($"Лимит: <b>{user.DailyCalorieLimit} ккал</b>");
+
+            if (user.DailyProteinsLimit is not null)
+            {
+                builder.AppendLine(
+                    $"Ориентиры по БЖУ: {Num(user.DailyProteinsLimit.Value)} / {Num(user.DailyFatsLimit ?? 0m)} / {Num(user.DailyCarbsLimit ?? 0m)} г");
+            }
         }
 
         builder.AppendLine();
@@ -293,18 +358,32 @@ public static class Texts
 
         builder.AppendLine("<i>Лимит действует постоянно, пока вы сами его не замените.</i>");
         builder.AppendLine();
-        builder.Append($"Сегодня съедено: <b>{progress.ConsumedCalories}</b> ккал, осталось <b>{progress.RemainingCalories}</b> ккал.");
+
+        builder.Append(user.TrackingMode == CalorieTrackingMode.Macros
+            ? $"В этом цикле осталось: Б {Num(progress.ProteinsRemaining)} · Ж {Num(progress.FatsRemaining)} · У {Num(progress.CarbsRemaining)} г."
+            : $"В этом цикле съедено: <b>{progress.ConsumedCalories}</b> ккал, осталось <b>{progress.RemainingCalories}</b> ккал.");
 
         return builder.ToString();
     }
 
-    /// <summary>Запрос нового лимита.</summary>
+    /// <summary>Спрашиваю, что именно пользователь хочет отслеживать.</summary>
+    public const string AskLimitMode =
+        "Как вам удобнее вести учёт?\n\n" +
+        "📐 <b>По калориям</b> — задаёте дневной максимум ккал, БЖУ считаются справочно (30/30/40 %).\n" +
+        "🥩 <b>По БЖУ</b> — задаёте лимиты белков/жиров/углеводов напрямую, калории — расчётная величина.";
+
+    /// <summary>Запрос нового лимита калорий.</summary>
     public static string AskCalorieLimit(int currentLimit) =>
         $"Текущий дневной максимум: <b>{currentLimit} ккал</b>.\n\n" +
         $"Отправьте новое значение числом — от {InputParser.MinCalorieLimit} до {InputParser.MaxCalorieLimit} ккал.\n" +
         "Например: <code>1800</code>";
 
-    /// <summary>Подтверждение смены лимита.</summary>
+    /// <summary>Запрос новых дневных лимитов БЖУ.</summary>
+    public const string AskMacroLimits =
+        "Пришлите дневные лимиты БЖУ в граммах — три числа в порядке <b>белки жиры углеводы</b>.\n\n" +
+        "Например: <code>150 60 250</code>";
+
+    /// <summary>Подтверждение смены лимита калорий.</summary>
     public static string LimitUpdated(AppUser user, DailyProgress progress)
     {
         var builder = new StringBuilder();
@@ -317,10 +396,34 @@ public static class Texts
         }
 
         builder.AppendLine();
-        builder.AppendLine($"Сегодня уже съедено <b>{progress.ConsumedCalories}</b> ккал.");
+        builder.AppendLine($"В этом цикле уже съедено <b>{progress.ConsumedCalories}</b> ккал.");
         builder.Append(progress.IsExceeded
             ? $"⚠️ <b>С новым лимитом это перебор на {progress.ExceededBy} ккал.</b>"
             : $"Осталось: <b>{progress.RemainingCalories}</b> ккал");
+
+        return builder.ToString();
+    }
+
+    /// <summary>Подтверждение смены лимитов БЖУ.</summary>
+    public static string MacroLimitsUpdated(AppUser user, DailyProgress progress)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine(
+            $"✅ Новые дневные лимиты: Б {Num(user.DailyProteinsLimit ?? 0m)} / Ж {Num(user.DailyFatsLimit ?? 0m)} / У {Num(user.DailyCarbsLimit ?? 0m)} г");
+        builder.AppendLine($"Это примерно <b>{user.DailyCalorieLimit} ккал</b> (справочно).");
+        builder.AppendLine();
+        builder.AppendLine(
+            $"В этом цикле уже съедено: Б {Num(progress.Proteins)} · Ж {Num(progress.Fats)} · У {Num(progress.Carbs)} г.");
+
+        if (progress.IsProteinsExceeded || progress.IsFatsExceeded || progress.IsCarbsExceeded)
+        {
+            builder.Append("⚠️ С новыми лимитами по некоторым нутриентам уже перебор.");
+        }
+        else
+        {
+            builder.Append(
+                $"Осталось: Б {Num(progress.ProteinsRemaining)} · Ж {Num(progress.FatsRemaining)} · У {Num(progress.CarbsRemaining)} г.");
+        }
 
         return builder.ToString();
     }
@@ -332,6 +435,14 @@ public static class Texts
         builder.AppendLine("💝 <b>Выберите продукт</b>");
         builder.AppendLine();
         builder.AppendLine($"В избранном: {totalFavorites}");
+
+        if (progress.TrackingMode == CalorieTrackingMode.Macros)
+        {
+            builder.Append(
+                $"Осталось: Б {Num(progress.ProteinsRemaining)} · Ж {Num(progress.FatsRemaining)} · У {Num(progress.CarbsRemaining)} г. " +
+                "Продукты, которые не вписываются, помечены знаком ⚠️ (для порций с плавающим весом — не помечаются).");
+            return builder.ToString();
+        }
 
         builder.Append(progress.IsExceeded
             ? $"⚠️ Лимит уже превышен на {progress.ExceededBy} ккал."
@@ -371,20 +482,27 @@ public static class Texts
     /// <summary>Сообщение об ошибке ввода — добавляю к тексту валидатора подсказку, что делать.</summary>
     public static string ValidationError(string error) => $"⚠️ {error}\n\nПопробуйте ещё раз.";
 
-    /// <summary>Страница списка «Мои продукты».</summary>
-    public static string FavoritesPage(IReadOnlyList<FavoriteProduct> products, int page, int pageSize)
+    /// <summary>Заголовок списка «Мои продукты» — сам список кликабельный (карточка на тап).</summary>
+    public static string MyProductsHeader(int totalFavorites) =>
+        $"📝 <b>Мои продукты</b> ({totalFavorites})\n\nВыберите продукт, чтобы посмотреть или изменить его.";
+
+    /// <summary>Карточка продукта с деталями и типом порции — экран редактирования.</summary>
+    public static string FavoriteDetailsCard(FavoriteProduct product)
     {
         var builder = new StringBuilder();
-        builder.AppendLine($"📝 <b>Мои продукты</b> ({products.Count})");
+        builder.AppendLine($"<b>{Escape(product.Name)}</b>");
         builder.AppendLine();
 
-        var index = page * pageSize + 1;
-        foreach (var product in products.Skip(page * pageSize).Take(pageSize))
+        if (product.IsFixedServing)
         {
-            builder.AppendLine($"<b>{index}. {Escape(product.Name)}</b>");
-            var serving = string.IsNullOrWhiteSpace(product.ServingSize) ? string.Empty : $" · порция: {Escape(product.ServingSize!)}";
-            builder.AppendLine($"   🔥 {product.Calories} ккал · Б {Num(product.Proteins)} · Ж {Num(product.Fats)} · У {Num(product.Carbs)}{serving}");
-            index++;
+            var serving = string.IsNullOrWhiteSpace(product.ServingSize) ? string.Empty : $" ({Escape(product.ServingSize!)})";
+            builder.AppendLine($"🍽 Фиксированная порция{serving}");
+            builder.AppendLine($"🔥 {product.Calories} ккал · Б {Num(product.Proteins)} · Ж {Num(product.Fats)} · У {Num(product.Carbs)} г");
+        }
+        else
+        {
+            builder.AppendLine("📏 Порция на 100 г — вес спрашивается при добавлении в дневник");
+            builder.AppendLine($"🔥 {product.Calories} ккал · Б {Num(product.Proteins)} · Ж {Num(product.Fats)} · У {Num(product.Carbs)} г — <i>на 100 г</i>");
         }
 
         return builder.ToString().TrimEnd();
@@ -434,9 +552,6 @@ public static class Texts
         var bar = new string('▰', filled) + new string('▱', cells - filled);
         return percent > 100 ? $"{bar} {percent}% ⚠️" : $"{bar} {percent}%";
     }
-
-    /// <summary>Дата в родительном падеже: «8 августа».</summary>
-    public static string LocalDate(DateOnly date) => $"{date.Day} {MonthsGenitive[date.Month - 1]}";
 
     /// <summary>Человеческая длительность: «5 ч 20 мин».</summary>
     public static string Duration(TimeSpan value)

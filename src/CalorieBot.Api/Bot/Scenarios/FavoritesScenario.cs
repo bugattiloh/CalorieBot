@@ -46,7 +46,7 @@ public sealed class FavoritesScenario
         await _messenger.SendAsync(chatId, Texts.AskProductName, Keyboards.FavoritesMenu, ct);
     }
 
-    /// <summary>Принимаю название будущего избранного продукта и спрашиваю, как удобнее ввести БЖУ.</summary>
+    /// <summary>Принимаю название будущего избранного продукта и спрашиваю тип порции.</summary>
     public async Task HandleNameAsync(long chatId, long userId, string? text, CancellationToken ct)
     {
         if (!InputParser.TryParseProductName(text, out var name, out var error))
@@ -59,7 +59,7 @@ public sealed class FavoritesScenario
         context.ProductName = name;
         context.State = ConversationState.AwaitingFavoriteMacrosMode;
 
-        var sent = await _messenger.SendAsync(chatId, Texts.AskMacrosMode, Keyboards.MacrosModeChoice(Callbacks.FavoriteMacrosMode), ct);
+        var sent = await _messenger.SendAsync(chatId, Texts.AskFavoriteServingMode, Keyboards.FavoriteServingModeChoice, ct);
         context.ActiveInlineMessageId = sent.MessageId;
     }
 
@@ -94,8 +94,9 @@ public sealed class FavoritesScenario
     }
 
     /// <summary>
-    /// Принимаю БЖУ. На порцию целиком — спрашиваю ещё размер порции текстом (шаг необязательный).
-    /// На 100 г — запоминаю значения и жду вес порции: он же станет размером порции продукта.
+    /// Принимаю БЖУ. Для фиксированной порции — спрашиваю ещё размер порции текстом (шаг необязательный).
+    /// Для порции на 100 г — введённые числа и есть готовый эталон, сохраняю их сразу без лишних вопросов
+    /// (вес конкретной съеденной порции спрошу потом, при добавлении в дневник).
     /// </summary>
     public async Task HandleMacrosAsync(long chatId, long userId, string? text, CancellationToken ct)
     {
@@ -114,18 +115,14 @@ public sealed class FavoritesScenario
             return;
         }
 
+        context.Apply(ProductDraft.FromMacros(context.ProductName, proteins, fats, carbs));
+
         if (context.MacrosPerHundredGrams)
         {
-            context.Proteins = proteins;
-            context.Fats = fats;
-            context.Carbs = carbs;
-            context.State = ConversationState.AwaitingFavoriteServingGrams;
-
-            await _messenger.SendAsync(chatId, Texts.AskServingGrams, Keyboards.FavoritesMenu, ct);
+            await SaveAsync(chatId, userId, context, isFixedServing: false, editMessageId: null, ct);
             return;
         }
 
-        context.Apply(ProductDraft.FromMacros(context.ProductName, proteins, fats, carbs));
         context.State = ConversationState.AwaitingFavoriteServingSize;
 
         var sent = await _messenger.SendAsync(
@@ -137,40 +134,7 @@ public sealed class FavoritesScenario
         context.ActiveInlineMessageId = sent.MessageId;
     }
 
-    /// <summary>
-    /// Принимаю вес порции, пересчитываю БЖУ со 100 г на неё и сохраняю — размер порции уже известен
-    /// (это и есть введённый вес), поэтому отдельно спрашивать его не нужно.
-    /// </summary>
-    public async Task HandleServingGramsAsync(long chatId, long userId, string? text, CancellationToken ct)
-    {
-        if (!InputParser.TryParseServingGrams(text, out var grams, out var error))
-        {
-            await _messenger.SendAsync(chatId, Texts.ValidationError(error), Keyboards.FavoritesMenu, ct);
-            return;
-        }
-
-        var context = _states.Get(userId);
-
-        if (string.IsNullOrWhiteSpace(context.ProductName))
-        {
-            await StartAddAsync(chatId, userId, ct);
-            return;
-        }
-
-        var scale = grams / 100m;
-        var draft = ProductDraft.FromMacros(
-            context.ProductName,
-            Math.Round(context.Proteins * scale, 1),
-            Math.Round(context.Fats * scale, 1),
-            Math.Round(context.Carbs * scale, 1),
-            servingSize: $"{grams} г");
-
-        context.Apply(draft);
-
-        await SaveAsync(chatId, userId, context, editMessageId: null, ct);
-    }
-
-    /// <summary>Принимаю описание порции текстом и сохраняю продукт.</summary>
+    /// <summary>Принимаю описание порции текстом и сохраняю продукт как фиксированную порцию.</summary>
     public async Task HandleServingSizeAsync(long chatId, long userId, string? text, CancellationToken ct)
     {
         if (!InputParser.TryParseServingSize(text, out var servingSize, out var error))
@@ -182,10 +146,10 @@ public sealed class FavoritesScenario
         var context = _states.Get(userId);
         context.ServingSize = servingSize;
 
-        await SaveAsync(chatId, userId, context, editMessageId: null, ct);
+        await SaveAsync(chatId, userId, context, isFixedServing: true, editMessageId: null, ct);
     }
 
-    /// <summary>Пользователь пропустил шаг с порцией — сохраняю продукт как есть.</summary>
+    /// <summary>Пользователь пропустил шаг с порцией — сохраняю продукт как фиксированную порцию как есть.</summary>
     public async Task HandleSkipServingSizeAsync(CallbackQuery query, CancellationToken ct)
     {
         if (query.Message is null)
@@ -206,10 +170,10 @@ public sealed class FavoritesScenario
         context.ServingSize = null;
 
         await _messenger.AnswerAsync(query, ct: ct);
-        await SaveAsync(query.Message.Chat.Id, userId, context, query.Message.MessageId, ct);
+        await SaveAsync(query.Message.Chat.Id, userId, context, isFixedServing: true, query.Message.MessageId, ct);
     }
 
-    /// <summary>Показываю страницу списка «Мои продукты».</summary>
+    /// <summary>Показываю страницу списка «Мои продукты» — список кликабельный, тап открывает карточку.</summary>
     public async Task ShowListAsync(long chatId, long userId, int page, int? editMessageId, CancellationToken ct)
     {
         var favorites = await _favorites.GetAllAsync(userId, ct);
@@ -220,14 +184,103 @@ public sealed class FavoritesScenario
             return;
         }
 
-        var totalPages = Math.Max(1, (int)Math.Ceiling(favorites.Count / (double)Keyboards.PageSize));
-        page = Math.Clamp(page, 0, totalPages - 1);
+        var keyboard = Keyboards.ProductPage(
+            favorites,
+            page,
+            Callbacks.FavoriteDetails,
+            Callbacks.ListPage,
+            product => Texts.ProductButtonLabel(product, fitsIntoLimit: true));
 
-        await SendOrEditAsync(
-            chatId,
-            editMessageId,
-            Texts.FavoritesPage(favorites, page, Keyboards.PageSize),
-            Keyboards.PageNavigation(page, totalPages, Callbacks.ListPage),
+        await SendOrEditAsync(chatId, editMessageId, Texts.MyProductsHeader(favorites.Count), keyboard, ct);
+    }
+
+    /// <summary>Показываю карточку продукта с действиями: изменить КБЖУ, переключить тип порции, удалить.</summary>
+    public async Task ShowDetailsAsync(CallbackQuery query, string? argument, CancellationToken ct)
+    {
+        if (query.Message is null || !int.TryParse(argument, out var favoriteId))
+        {
+            await _messenger.AnswerAsync(query, Texts.StaleDialog, ct: ct);
+            return;
+        }
+
+        var userId = query.From.Id;
+        var product = await _favorites.GetAsync(userId, favoriteId, ct);
+
+        if (product is null)
+        {
+            await _messenger.AnswerAsync(query, "Продукт не найден — возможно, он уже удалён.", showAlert: true, ct: ct);
+            await ShowListAsync(query.Message.Chat.Id, userId, 0, query.Message.MessageId, ct);
+            return;
+        }
+
+        await _messenger.AnswerAsync(query, ct: ct);
+        await _messenger.EditAsync(
+            query.Message.Chat.Id,
+            query.Message.MessageId,
+            Texts.FavoriteDetailsCard(product),
+            Keyboards.FavoriteDetailsActions(product.Id, product.IsFixedServing),
+            ct);
+    }
+
+    /// <summary>
+    /// Начинаю изменение КБЖУ уже сохранённого продукта — переиспользую сценарий добавления
+    /// с готовым именем: он обновит существующую запись, а не создаст дубль.
+    /// </summary>
+    public async Task StartEditMacrosAsync(CallbackQuery query, string? argument, CancellationToken ct)
+    {
+        if (query.Message is null || !int.TryParse(argument, out var favoriteId))
+        {
+            await _messenger.AnswerAsync(query, Texts.StaleDialog, ct: ct);
+            return;
+        }
+
+        var userId = query.From.Id;
+        var product = await _favorites.GetAsync(userId, favoriteId, ct);
+
+        if (product is null)
+        {
+            await _messenger.AnswerAsync(query, "Продукт не найден — возможно, он уже удалён.", showAlert: true, ct: ct);
+            await ShowListAsync(query.Message.Chat.Id, userId, 0, query.Message.MessageId, ct);
+            return;
+        }
+
+        var context = _states.Get(userId);
+        context.Reset();
+        context.ProductName = product.Name;
+        context.State = ConversationState.AwaitingFavoriteMacrosMode;
+        context.ActiveInlineMessageId = query.Message.MessageId;
+
+        await _messenger.AnswerAsync(query, ct: ct);
+        await _messenger.EditAsync(query.Message.Chat.Id, query.Message.MessageId, Texts.AskFavoriteServingMode, Keyboards.FavoriteServingModeChoice, ct);
+    }
+
+    /// <summary>Переключаю тип порции без изменения КБЖУ и обновляю карточку.</summary>
+    public async Task HandleToggleFixedServingAsync(CallbackQuery query, string? argument, CancellationToken ct)
+    {
+        if (query.Message is null || !int.TryParse(argument, out var favoriteId))
+        {
+            await _messenger.AnswerAsync(query, Texts.StaleDialog, ct: ct);
+            return;
+        }
+
+        var userId = query.From.Id;
+        var product = await _favorites.GetAsync(userId, favoriteId, ct);
+
+        if (product is null)
+        {
+            await _messenger.AnswerAsync(query, "Продукт не найден — возможно, он уже удалён.", showAlert: true, ct: ct);
+            await ShowListAsync(query.Message.Chat.Id, userId, 0, query.Message.MessageId, ct);
+            return;
+        }
+
+        var updated = await _favorites.SetFixedServingAsync(userId, favoriteId, !product.IsFixedServing, ct);
+
+        await _messenger.AnswerAsync(query, updated.IsFixedServing ? "Теперь порция фиксированная 🍽" : "Теперь порция плавающая 📏", ct: ct);
+        await _messenger.EditAsync(
+            query.Message.Chat.Id,
+            query.Message.MessageId,
+            Texts.FavoriteDetailsCard(updated),
+            Keyboards.FavoriteDetailsActions(updated.Id, updated.IsFixedServing),
             ct);
     }
 
@@ -329,16 +382,17 @@ public sealed class FavoritesScenario
             ct);
     }
 
-    /// <summary>Общая точка сохранения: и для введённой порции, и для пропущенного шага.</summary>
+    /// <summary>Общая точка сохранения: и для введённой порции, и для пропущенного шага, и для порции на 100 г.</summary>
     private async Task SaveAsync(
         long chatId,
         long userId,
         ConversationContext context,
+        bool isFixedServing,
         int? editMessageId,
         CancellationToken ct)
     {
         var draft = context.ToDraft();
-        var (created, product) = await _favorites.AddOrUpdateAsync(userId, draft, ct);
+        var (created, product) = await _favorites.AddOrUpdateAsync(userId, draft, isFixedServing, ct);
 
         context.Reset();
 

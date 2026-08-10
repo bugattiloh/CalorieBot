@@ -11,7 +11,7 @@ using Moq;
 
 namespace CalorieBot.Tests.Scenarios;
 
-/// <summary>Сценарии просмотра: «📊 Мой прогресс» и «📋 История сегодня».</summary>
+/// <summary>Сценарий «📊 Мой прогресс»: прогресс текущего цикла плюс его история одним сообщением.</summary>
 public class ProgressScenarioTests
 {
     private const long ChatId = 100;
@@ -36,6 +36,7 @@ public class ProgressScenarioTests
     private static DailyProgress BuildProgress(int limit, int consumed) => new()
     {
         CycleStartedAt = new DateTime(2026, 8, 8, 0, 0, 0, DateTimeKind.Utc),
+        TrackingMode = CalorieTrackingMode.Calories,
         CalorieLimit = limit,
         ConsumedCalories = consumed
     };
@@ -46,6 +47,7 @@ public class ProgressScenarioTests
         var h = CreateHarness();
         h.States.Get(UserId).State = ConversationState.AwaitingFavoriteName;
         h.Progress.Setup(p => p.GetCurrentCycleAsync(UserId, It.IsAny<CancellationToken>())).ReturnsAsync(BuildProgress(2000, 800));
+        h.FoodLog.Setup(f => f.GetCurrentCycleAsync(UserId, It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<FoodLogEntry>());
 
         await h.Scenario.ShowProgressAsync(ChatId, UserId, CancellationToken.None);
 
@@ -55,7 +57,7 @@ public class ProgressScenarioTests
     }
 
     [Fact]
-    public async Task ShowHistoryAsync_WithEntries_ListsThemInMessage()
+    public async Task ShowProgressAsync_WithEntries_ListsHistoryInSameMessage()
     {
         var h = CreateHarness();
         h.Progress.Setup(p => p.GetCurrentCycleAsync(UserId, It.IsAny<CancellationToken>())).ReturnsAsync(BuildProgress(2000, 300));
@@ -65,22 +67,22 @@ public class ProgressScenarioTests
                 new() { ProductName = "Овсянка", Calories = 300, MealType = MealType.Breakfast, LoggedAt = DateTime.UtcNow }
             });
 
-        await h.Scenario.ShowHistoryAsync(ChatId, UserId, CancellationToken.None);
+        await h.Scenario.ShowProgressAsync(ChatId, UserId, CancellationToken.None);
 
         Assert.Single(h.Bot.Sent);
         Assert.Contains("Овсянка", h.Bot.Sent[0].Text);
     }
 
     [Fact]
-    public async Task ShowHistoryAsync_WithNoEntries_SaysNothingLoggedYet()
+    public async Task ShowProgressAsync_WithNoEntries_SaysNothingLoggedYet()
     {
         var h = CreateHarness();
         h.Progress.Setup(p => p.GetCurrentCycleAsync(UserId, It.IsAny<CancellationToken>())).ReturnsAsync(BuildProgress(2000, 0));
-        h.FoodLog.Setup(f => f.GetCurrentCycleAsync(UserId, It.IsAny<CancellationToken>())).ReturnsAsync(new List<FoodLogEntry>());
+        h.FoodLog.Setup(f => f.GetCurrentCycleAsync(UserId, It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<FoodLogEntry>());
 
-        await h.Scenario.ShowHistoryAsync(ChatId, UserId, CancellationToken.None);
+        await h.Scenario.ShowProgressAsync(ChatId, UserId, CancellationToken.None);
 
         Assert.Single(h.Bot.Sent);
-        Assert.Contains("ещё ничего не записали", h.Bot.Sent[0].Text);
+        Assert.Contains("Пока ничего не записано", h.Bot.Sent[0].Text);
     }
 }

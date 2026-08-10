@@ -33,6 +33,7 @@ public class CalorieBotDbContext : DbContext
             entity.Property(e => e.UserId).ValueGeneratedNever();
             entity.Property(e => e.Username).HasColumnType("text");
             entity.Property(e => e.FirstName).HasColumnType("text");
+            entity.Property(e => e.TrackingMode).HasConversion<int>().IsRequired().HasDefaultValue(CalorieTrackingMode.Calories);
             entity.Property(e => e.DailyCalorieLimit).IsRequired().HasDefaultValue(2000);
             entity.Property(e => e.DailyProteinsLimit).HasColumnType("numeric(7,2)");
             entity.Property(e => e.DailyFatsLimit).HasColumnType("numeric(7,2)");
@@ -52,6 +53,7 @@ public class CalorieBotDbContext : DbContext
             entity.Property(e => e.Proteins).HasColumnType("numeric(7,2)").HasDefaultValue(0m);
             entity.Property(e => e.Fats).HasColumnType("numeric(7,2)").HasDefaultValue(0m);
             entity.Property(e => e.Carbs).HasColumnType("numeric(7,2)").HasDefaultValue(0m);
+            entity.Property(e => e.IsFixedServing).IsRequired().HasDefaultValue(true);
             entity.Property(e => e.ServingSize).HasColumnType("text");
             entity.Property(e => e.CreatedAt).HasColumnType("timestamp with time zone").HasDefaultValueSql("now()");
 

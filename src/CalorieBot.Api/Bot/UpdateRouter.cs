@@ -124,16 +124,16 @@ public sealed class UpdateRouter
                 await _favorites.HandleMacrosAsync(chatId, userId, text, ct);
                 return;
 
-            case ConversationState.AwaitingFavoriteServingGrams:
-                await _favorites.HandleServingGramsAsync(chatId, userId, text, ct);
-                return;
-
             case ConversationState.AwaitingFavoriteServingSize:
                 await _favorites.HandleServingSizeAsync(chatId, userId, text, ct);
                 return;
 
             case ConversationState.AwaitingCalorieLimit:
                 await _limit.HandleNewLimitAsync(chatId, userId, text, ct);
+                return;
+
+            case ConversationState.AwaitingMacroLimits:
+                await _limit.HandleNewMacroLimitsAsync(chatId, userId, text, ct);
                 return;
 
             default:
@@ -162,10 +162,6 @@ public sealed class UpdateRouter
 
             case Buttons.Limit:
                 await _limit.ShowMenuAsync(chatId, userId, ct);
-                return true;
-
-            case Buttons.History:
-                await _progress.ShowHistoryAsync(chatId, userId, ct);
                 return true;
 
             case Buttons.NewDay:
@@ -248,6 +244,22 @@ public sealed class UpdateRouter
 
             case Callbacks.FavoriteMacrosMode:
                 await _favorites.HandleMacrosModeAsync(query, argument, ct);
+                return;
+
+            case Callbacks.LimitMode:
+                await _limit.HandleLimitModeAsync(query, argument, ct);
+                return;
+
+            case Callbacks.FavoriteDetails:
+                await _favorites.ShowDetailsAsync(query, argument, ct);
+                return;
+
+            case Callbacks.FavoriteEditMacros:
+                await _favorites.StartEditMacrosAsync(query, argument, ct);
+                return;
+
+            case Callbacks.FavoriteToggleFixed:
+                await _favorites.HandleToggleFixedServingAsync(query, argument, ct);
                 return;
 
             case Callbacks.NewDayConfirm:

@@ -37,6 +37,7 @@ public class CycleScenarioTests
     private static DailyProgress BuildProgress(int limit, int consumed) => new()
     {
         CycleStartedAt = new DateTime(2026, 8, 8, 9, 0, 0, DateTimeKind.Utc),
+        TrackingMode = CalorieTrackingMode.Calories,
         CalorieLimit = limit,
         ConsumedCalories = consumed
     };

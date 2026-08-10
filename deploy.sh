@@ -82,7 +82,10 @@ fi
 
 current_password="$(grep -E '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)"
 if [ -z "$current_password" ] || [ "$current_password" = "change_me_please" ]; then
-    generated_password="$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32)"
+    # Читаю фиксированное число байт из /dev/urandom, а не бесконечный поток через tr —
+    # иначе head, получив 32 байта, обрывает канал раньше tr, tr падает по SIGPIPE,
+    # и весь скрипт молча завершается из-за set -e -o pipefail.
+    generated_password="$(head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32)"
     sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${generated_password}|" .env
     echo "Сгенерировал случайный пароль для PostgreSQL и сохранил его в .env на сервере."
 fi

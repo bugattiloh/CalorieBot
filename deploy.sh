@@ -15,6 +15,14 @@ confirm() {
     [[ -z "$reply" || "$reply" =~ ^[Yy] ]]
 }
 
+token_is_valid() {
+    # Проверяю не только формат (цифры:буквы), но и что Telegram реально его принимает —
+    # иначе легко случайно вставить старый/отозванный токен, и он молча пройдёт проверку.
+    local token="$1"
+    [[ "$token" =~ ^[0-9]+:.+ ]] || return 1
+    curl -fsS "https://api.telegram.org/bot${token}/getMe" 2>/dev/null | grep -q '"ok":true'
+}
+
 # --- 1. Docker и Compose ---------------------------------------------------
 
 if ! command -v docker >/dev/null 2>&1; then
@@ -56,19 +64,20 @@ if [ ! -f .env ]; then
 fi
 
 current_token="$(grep -E '^BOT_TOKEN=' .env | cut -d= -f2-)"
-if [[ ! "$current_token" =~ ^[0-9]+:.+ ]]; then
+if ! token_is_valid "$current_token"; then
     echo
-    echo "Нужен токен бота из @BotFather (там: /mybots → выбрать бота → API Token)."
+    echo "Нужен действующий токен бота из @BotFather (там: /mybots → выбрать бота → API Token)."
     while true; do
         read -r -p "Вставьте BOT_TOKEN: " bot_token </dev/tty
-        if [[ "$bot_token" =~ ^[0-9]+:.+ ]]; then
+        if token_is_valid "$bot_token"; then
             break
         fi
-        echo "Не похоже на токен BotFather (формат вроде 123456789:AA...). Попробуйте ещё раз."
+        echo "Telegram не признал этот токен — либо неверный формат, либо он отозван/устарел. Проверьте в @BotFather и попробуйте ещё раз."
     done
     # Экранирую спецсимволы sed, чтобы токен с произвольными символами не сломал замену.
     escaped_token=$(printf '%s' "$bot_token" | sed 's/[&/\]/\\&/g')
     sed -i "s|^BOT_TOKEN=.*|BOT_TOKEN=${escaped_token}|" .env
+    echo "Токен проверен и сохранён."
 fi
 
 current_password="$(grep -E '^POSTGRES_PASSWORD=' .env | cut -d= -f2-)"

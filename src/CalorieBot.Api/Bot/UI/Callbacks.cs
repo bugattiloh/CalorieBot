@@ -141,6 +141,36 @@ public static class Callbacks
     /// <summary>Подтверждён перенос продукта в другую подкатегорию: fmcc:{favoriteId}:{categoryId|none}.</summary>
     public const string FavoriteMoveCategoryConfirm = "fmcc";
 
+    /// <summary>Вернуться из вложенного экрана «Избранного» (Вода/Блюда/Продукты) на его меню, а не в главное.</summary>
+    public const string FavoritesMenu = "favm";
+
+    /// <summary>Вернуться из списка продуктов подкатегории к списку самих подкатегорий.</summary>
+    public const string ProductCategoriesShow = "pcs";
+
+    /// <summary>Выбор источника ингредиента для блюда: dis:{dishId}.</summary>
+    public const string DishIngredientSource = "dis";
+
+    /// <summary>Начать добавление ингредиента вручную (имя + БЖУ): dic:{dishId}.</summary>
+    public const string DishIngredientCustom = "dic";
+
+    /// <summary>Показать список избранных продуктов для добавления в блюдо: diff:{dishId}, листание — diff:{dishId}:{page}.</summary>
+    public const string DishIngredientFromFavorite = "diff";
+
+    /// <summary>Выбран конкретный избранный продукт как ингредиент: dipf:{dishId}:{favoriteId}.</summary>
+    public const string DishIngredientPickFavorite = "dipf";
+
+    /// <summary>Выбран пол в калькуляторе нормы КБЖУ: lcs:m или lcs:f.</summary>
+    public const string LimitCalcSex = "lcs";
+
+    /// <summary>Выбран уровень активности в калькуляторе нормы КБЖУ: lca:sedentary|light|moderate|high|extreme.</summary>
+    public const string LimitCalcActivity = "lca";
+
+    /// <summary>Выбрана цель в калькуляторе нормы КБЖУ: lcg:lose|maintain|gain.</summary>
+    public const string LimitCalcGoal = "lcg";
+
+    /// <summary>Применить результат расчёта как новый лимит по БЖУ: lcap:lose|maintain|gain.</summary>
+    public const string LimitCalcApply = "lcap";
+
     /// <summary>Кнопка-заглушка (например, счётчик страниц) — ничего не делает.</summary>
     public const string Noop = "noop";
 

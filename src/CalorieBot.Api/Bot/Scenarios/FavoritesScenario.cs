@@ -39,6 +39,37 @@ public sealed class FavoritesScenario
         return _messenger.SendAsync(chatId, Texts.FavoritesMenuText, Keyboards.FavoritesMenu, ct);
     }
 
+    /// <summary>
+    /// Возврат в меню «Избранное» по инлайн-кнопке «◀️ Избранное» — из вложенных экранов (Вода,
+    /// Продукты, Готовые блюда), а не сразу в главное меню бота.
+    /// </summary>
+    public async Task ShowMenuFromCallbackAsync(CallbackQuery query, CancellationToken ct)
+    {
+        if (query.Message is null)
+        {
+            await _messenger.AnswerAsync(query, Texts.StaleDialog, ct: ct);
+            return;
+        }
+
+        _states.Get(query.From.Id).Reset();
+        await _messenger.AnswerAsync(query, ct: ct);
+        await _messenger.RemoveKeyboardAsync(query.Message.Chat.Id, query.Message.MessageId, ct);
+        await _messenger.SendAsync(query.Message.Chat.Id, Texts.FavoritesMenuText, Keyboards.FavoritesMenu, ct);
+    }
+
+    /// <summary>Возврат из списка продуктов подкатегории к списку самих подкатегорий (обычный режим просмотра).</summary>
+    public async Task ShowProductCategoriesFromCallbackAsync(CallbackQuery query, CancellationToken ct)
+    {
+        if (query.Message is null)
+        {
+            await _messenger.AnswerAsync(query, Texts.StaleDialog, ct: ct);
+            return;
+        }
+
+        await _messenger.AnswerAsync(query, ct: ct);
+        await ShowProductCategoriesAsync(query.Message.Chat.Id, query.From.Id, query.Message.MessageId, manageMode: false, ct);
+    }
+
     // ------------------------------------------------------------------
     // Вода
     // ------------------------------------------------------------------
@@ -56,6 +87,8 @@ public sealed class FavoritesScenario
             Callbacks.WaterPage,
             Callbacks.WaterAdd,
             "➕ Добавить жидкость",
+            "◀️ Избранное",
+            Callbacks.FavoritesMenu,
             product => Texts.ProductButtonLabel(product, fitsIntoLimit: true));
 
         await _messenger.SendOrEditAsync(chatId, editMessageId, Texts.WaterListHeader(items.Count), keyboard, ct);
@@ -182,6 +215,8 @@ public sealed class FavoritesScenario
             Callbacks.Build(Callbacks.ProductCategoryPick, categoryId),
             Callbacks.Build(Callbacks.ProductAddHere, categoryId),
             "➕ Добавить сюда",
+            "◀️ К категориям",
+            Callbacks.ProductCategoriesShow,
             product => Texts.ProductButtonLabel(product, fitsIntoLimit: true));
 
         await _messenger.SendOrEditAsync(chatId, editMessageId, Texts.ProductsInCategoryHeader(categoryName, items.Count), keyboard, ct);

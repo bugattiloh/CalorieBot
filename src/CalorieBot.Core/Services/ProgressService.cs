@@ -110,9 +110,12 @@ public sealed class ProgressService : IProgressService
         var todayLocal = DateOnly.FromDateTime(_clock.UtcNow + _clock.Offset);
         var periodStartLocal = todayLocal.AddDays(-periodDays);
 
+        // DateOnly.ToDateTime всегда отдаёт Kind=Unspecified — Npgsql такой DateTime в параметр
+        // под timestamptz не примет (кинет исключение), поэтому явно проставляю Utc: тикскоунт от этого
+        // не меняется, а значение и так уже пересчитано в UTC вычитанием смещения.
+        var periodStartUtc = DateTime.SpecifyKind(periodStartLocal.ToDateTime(TimeOnly.MinValue) - _clock.Offset, DateTimeKind.Utc);
+        var periodEndUtc = DateTime.SpecifyKind(todayLocal.ToDateTime(TimeOnly.MinValue) - _clock.Offset, DateTimeKind.Utc);
         // Верхняя граница — начало сегодняшнего дня: сегодняшний, ещё не законченный день в отчёт не включаю.
-        var periodStartUtc = periodStartLocal.ToDateTime(TimeOnly.MinValue) - _clock.Offset;
-        var periodEndUtc = todayLocal.ToDateTime(TimeOnly.MinValue) - _clock.Offset;
 
         var entries = await _db.FoodLog
             .AsNoTracking()

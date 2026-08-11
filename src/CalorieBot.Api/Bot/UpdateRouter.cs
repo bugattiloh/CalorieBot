@@ -171,6 +171,22 @@ public sealed class UpdateRouter
                 await _dish.HandleIngredientMacrosAsync(chatId, userId, text, ct);
                 return;
 
+            case ConversationState.AwaitingDishIngredientGrams:
+                await _dish.HandleIngredientGramsAsync(chatId, userId, text, ct);
+                return;
+
+            case ConversationState.AwaitingCalcAge:
+                await _limit.HandleCalcAgeAsync(chatId, userId, text, ct);
+                return;
+
+            case ConversationState.AwaitingCalcHeight:
+                await _limit.HandleCalcHeightAsync(chatId, userId, text, ct);
+                return;
+
+            case ConversationState.AwaitingCalcWeight:
+                await _limit.HandleCalcWeightAsync(chatId, userId, text, ct);
+                return;
+
             default:
                 await _messenger.SendAsync(chatId, Texts.OnlyButtons, Keyboards.MainMenu, ct);
                 return;
@@ -293,6 +309,22 @@ public sealed class UpdateRouter
                 await _limit.HandleLimitModeAsync(query, argument, ct);
                 return;
 
+            case Callbacks.LimitCalcSex:
+                await _limit.HandleCalcSexAsync(query, argument, ct);
+                return;
+
+            case Callbacks.LimitCalcActivity:
+                await _limit.HandleCalcActivityAsync(query, argument, ct);
+                return;
+
+            case Callbacks.LimitCalcGoal:
+                await _limit.HandleCalcGoalAsync(query, argument, ct);
+                return;
+
+            case Callbacks.LimitCalcApply:
+                await _limit.HandleCalcApplyAsync(query, argument, ct);
+                return;
+
             case Callbacks.FavoriteDetails:
                 await _favorites.ShowDetailsAsync(query, argument, ct);
                 return;
@@ -373,6 +405,22 @@ public sealed class UpdateRouter
                 await _dish.StartAddIngredientAsync(query, argument, ct);
                 return;
 
+            case Callbacks.DishIngredientSource:
+                await _dish.StartAddIngredientAsync(query, argument, ct);
+                return;
+
+            case Callbacks.DishIngredientCustom:
+                await _dish.StartAddCustomIngredientAsync(query, argument, ct);
+                return;
+
+            case Callbacks.DishIngredientFromFavorite:
+                await _dish.ShowFavoriteIngredientPickerAsync(query, argument, ct);
+                return;
+
+            case Callbacks.DishIngredientPickFavorite:
+                await _dish.HandlePickFavoriteIngredientAsync(query, argument, ct);
+                return;
+
             case Callbacks.DishIngredientDeleteRequest:
                 await _dish.HandleIngredientDeleteRequestAsync(query, argument, ct);
                 return;
@@ -419,6 +467,14 @@ public sealed class UpdateRouter
 
             case Callbacks.FavoriteMoveCategoryConfirm:
                 await _favorites.HandleMoveCategoryConfirmAsync(query, argument, ct);
+                return;
+
+            case Callbacks.FavoritesMenu:
+                await _favorites.ShowMenuFromCallbackAsync(query, ct);
+                return;
+
+            case Callbacks.ProductCategoriesShow:
+                await _favorites.ShowProductCategoriesFromCallbackAsync(query, ct);
                 return;
 
             case Callbacks.DeletePage:

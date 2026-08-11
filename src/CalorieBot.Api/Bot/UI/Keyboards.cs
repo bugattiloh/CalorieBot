@@ -163,11 +163,47 @@ public static class Keyboards
         new[] { InlineKeyboardButton.WithCallbackData("⏭ Пропустить", Callbacks.SkipServing) }
     });
 
-    /// <summary>Выбор режима отслеживания лимита: по калориям или по БЖУ.</summary>
+    /// <summary>Выбор режима отслеживания лимита: по калориям, по БЖУ напрямую или расчётом по формуле.</summary>
     public static InlineKeyboardMarkup LimitModeChoice { get; } = new(new[]
     {
         new[] { InlineKeyboardButton.WithCallbackData("📐 По калориям", Callbacks.Build(Callbacks.LimitMode, "cal")) },
-        new[] { InlineKeyboardButton.WithCallbackData("🥩 По БЖУ", Callbacks.Build(Callbacks.LimitMode, "macro")) }
+        new[] { InlineKeyboardButton.WithCallbackData("🥩 По БЖУ", Callbacks.Build(Callbacks.LimitMode, "macro")) },
+        new[] { InlineKeyboardButton.WithCallbackData("🧮 Рассчитать по формуле", Callbacks.Build(Callbacks.LimitMode, "calc")) }
+    });
+
+    /// <summary>Первый шаг калькулятора нормы КБЖУ — пол (нужен формуле Миффлина — Сан-Жеора).</summary>
+    public static InlineKeyboardMarkup CalcSexChoice { get; } = new(new[]
+    {
+        new[]
+        {
+            InlineKeyboardButton.WithCallbackData("👨 Мужчина", Callbacks.Build(Callbacks.LimitCalcSex, "m")),
+            InlineKeyboardButton.WithCallbackData("👩 Женщина", Callbacks.Build(Callbacks.LimitCalcSex, "f"))
+        }
+    });
+
+    /// <summary>Выбор уровня активности — коэффициент для перевода базового обмена в суточную норму.</summary>
+    public static InlineKeyboardMarkup CalcActivityChoice { get; } = new(new[]
+    {
+        new[] { InlineKeyboardButton.WithCallbackData("🛋 Сидячий образ жизни", Callbacks.Build(Callbacks.LimitCalcActivity, "sedentary")) },
+        new[] { InlineKeyboardButton.WithCallbackData("🚶 Лёгкая (1–2 трен/нед)", Callbacks.Build(Callbacks.LimitCalcActivity, "light")) },
+        new[] { InlineKeyboardButton.WithCallbackData("🏃 Средняя (3–5 трен/нед)", Callbacks.Build(Callbacks.LimitCalcActivity, "moderate")) },
+        new[] { InlineKeyboardButton.WithCallbackData("🏋 Высокая (тренировки ежедневно)", Callbacks.Build(Callbacks.LimitCalcActivity, "high")) },
+        new[] { InlineKeyboardButton.WithCallbackData("🔥 Экстремальная (проф. спорт)", Callbacks.Build(Callbacks.LimitCalcActivity, "extreme")) }
+    });
+
+    /// <summary>Выбор цели — определяет и корректировку калорийности, и норму белка на кг веса.</summary>
+    public static InlineKeyboardMarkup CalcGoalChoice { get; } = new(new[]
+    {
+        new[] { InlineKeyboardButton.WithCallbackData("📉 Похудение (−15% от нормы)", Callbacks.Build(Callbacks.LimitCalcGoal, "lose")) },
+        new[] { InlineKeyboardButton.WithCallbackData("⚖️ Поддержание веса", Callbacks.Build(Callbacks.LimitCalcGoal, "maintain")) },
+        new[] { InlineKeyboardButton.WithCallbackData("📈 Набор массы (+15% от нормы)", Callbacks.Build(Callbacks.LimitCalcGoal, "gain")) }
+    });
+
+    /// <summary>Применить рассчитанный лимит или отменить расчёт.</summary>
+    public static InlineKeyboardMarkup CalcResultActions(string goal) => new(new[]
+    {
+        new[] { InlineKeyboardButton.WithCallbackData("✅ Применить как лимит по БЖУ", Callbacks.Build(Callbacks.LimitCalcApply, goal)) },
+        new[] { InlineKeyboardButton.WithCallbackData("❌ Отмена", Callbacks.ToMenu) }
     });
 
     /// <summary>Подтверждение начала нового дня — сброс цикла случайным тапом быть не должен.</summary>
@@ -301,7 +337,11 @@ public static class Keyboards
     public static InlineKeyboardMarkup PageNavigation(int page, int totalPages, string pageAction) =>
         new(NavigationRows(page, totalPages, pageAction));
 
-    /// <summary>Список продуктов одной группы избранного (Вода/Готовые блюда/подкатегория Продуктов) плюс кнопка добавления.</summary>
+    /// <summary>
+    /// Список продуктов одной группы избранного (Вода/Готовые блюда/подкатегория Продуктов) плюс кнопка
+    /// добавления. Кнопка возврата — своя (<paramref name="backLabel"/>/<paramref name="backActionData"/>),
+    /// а не общий «В меню»: экран вложенный, должен возвращать на шаг назад, а не сразу в главное меню.
+    /// </summary>
     public static InlineKeyboardMarkup CategoryItemList(
         IReadOnlyList<FavoriteProduct> products,
         int page,
@@ -309,6 +349,8 @@ public static class Keyboards
         string pageAction,
         string addActionData,
         string addLabel,
+        string backLabel,
+        string backActionData,
         Func<FavoriteProduct, string> labelFactory)
     {
         var totalPages = Math.Max(1, (int)Math.Ceiling(products.Count / (double)PageSize));
@@ -322,13 +364,14 @@ public static class Keyboards
         }
 
         rows.Add(new[] { InlineKeyboardButton.WithCallbackData(addLabel, addActionData) });
-        rows.AddRange(NavigationRows(page, totalPages, pageAction));
+        rows.AddRange(NavigationRows(page, totalPages, pageAction, backLabel, backActionData));
         return new InlineKeyboardMarkup(rows);
     }
 
     /// <summary>
     /// Подкатегории «Продуктов»: в обычном режиме — тап открывает список продуктов, в режиме управления —
-    /// карточку с переименованием/удалением.
+    /// карточку с переименованием/удалением. Кнопка возврата: из обычного режима — в меню «Избранное»,
+    /// из режима управления — обратно к обычному списку подкатегорий.
     /// </summary>
     public static InlineKeyboardMarkup ProductCategoriesList(IReadOnlyList<ProductCategory> categories, bool hasUncategorized, bool manageMode)
     {
@@ -354,7 +397,10 @@ public static class Keyboards
                 InlineKeyboardButton.WithCallbackData("✏️ Управлять", Callbacks.ProductCategoryManage)
             });
 
-        rows.Add(new[] { InlineKeyboardButton.WithCallbackData("🔙 В меню", Callbacks.ToMenu) });
+        rows.Add(manageMode
+            ? new[] { InlineKeyboardButton.WithCallbackData("◀️ К подкатегориям", Callbacks.ProductCategoriesShow) }
+            : new[] { InlineKeyboardButton.WithCallbackData("◀️ Избранное", Callbacks.FavoritesMenu) });
+
         return new InlineKeyboardMarkup(rows);
     }
 
@@ -418,7 +464,39 @@ public static class Keyboards
         new[] { InlineKeyboardButton.WithCallbackData("◀️ Назад", Callbacks.Build(Callbacks.DishDetails, dishId)) }
     });
 
-    private static List<InlineKeyboardButton[]> NavigationRows(int page, int totalPages, string pageAction)
+    /// <summary>Выбор источника ингредиента для блюда — из избранного или свой продукт.</summary>
+    public static InlineKeyboardMarkup DishIngredientSourceChoice(int dishId) => new(new[]
+    {
+        new[] { InlineKeyboardButton.WithCallbackData("⭐ Из избранного", Callbacks.Build(Callbacks.DishIngredientFromFavorite, dishId)) },
+        new[] { InlineKeyboardButton.WithCallbackData("🔍 Свой продукт", Callbacks.Build(Callbacks.DishIngredientCustom, dishId)) },
+        new[] { InlineKeyboardButton.WithCallbackData("◀️ Назад", Callbacks.Build(Callbacks.DishDetails, dishId)) }
+    });
+
+    /// <summary>Список избранных продуктов для выбора в качестве ингредиента блюда.</summary>
+    public static InlineKeyboardMarkup DishIngredientFavoritePicker(
+        IReadOnlyList<FavoriteProduct> products, int page, int dishId, Func<FavoriteProduct, string> labelFactory)
+    {
+        var totalPages = Math.Max(1, (int)Math.Ceiling(products.Count / (double)PageSize));
+        page = Math.Clamp(page, 0, totalPages - 1);
+
+        var rows = new List<InlineKeyboardButton[]>();
+
+        foreach (var product in products.Skip(page * PageSize).Take(PageSize))
+        {
+            rows.Add(new[]
+            {
+                InlineKeyboardButton.WithCallbackData(labelFactory(product), Callbacks.Build(Callbacks.DishIngredientPickFavorite, $"{dishId}:{product.Id}"))
+            });
+        }
+
+        rows.AddRange(NavigationRows(
+            page, totalPages, Callbacks.Build(Callbacks.DishIngredientFromFavorite, dishId),
+            "◀️ Назад", Callbacks.Build(Callbacks.DishIngredientSource, dishId)));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    private static List<InlineKeyboardButton[]> NavigationRows(
+        int page, int totalPages, string pageAction, string backLabel = "🔙 В меню", string backActionData = Callbacks.ToMenu)
     {
         var rows = new List<InlineKeyboardButton[]>();
 
@@ -442,7 +520,7 @@ public static class Keyboards
             rows.Add(navigation.ToArray());
         }
 
-        rows.Add(new[] { InlineKeyboardButton.WithCallbackData("🔙 В меню", Callbacks.ToMenu) });
+        rows.Add(new[] { InlineKeyboardButton.WithCallbackData(backLabel, backActionData) });
         return rows;
     }
 }

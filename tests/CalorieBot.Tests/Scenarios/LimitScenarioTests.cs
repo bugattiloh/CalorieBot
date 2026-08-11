@@ -1,6 +1,7 @@
 using CalorieBot.Api.Bot;
 using CalorieBot.Api.Bot.Scenarios;
 using CalorieBot.Core.Models;
+using CalorieBot.Core.Nutrition;
 using CalorieBot.Core.Services;
 using CalorieBot.Core.State;
 using CalorieBot.Data.Entities;
@@ -186,4 +187,115 @@ public class LimitScenarioTests
         Message = new Message { Id = 55, Chat = new Chat { Id = ChatId } },
         Data = data
     };
+
+    // ------------------------------------------------------------------
+    // Калькулятор нормы КБЖУ
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task HandleLimitModeAsync_WithCalc_AwaitsSex()
+    {
+        var h = CreateHarness();
+
+        var query = BuildCallbackQuery("lm:calc");
+        await h.Scenario.HandleLimitModeAsync(query, argument: "calc", CancellationToken.None);
+
+        Assert.Equal(ConversationState.AwaitingCalcSex, h.States.Get(UserId).State);
+        Assert.Single(h.Bot.Edited);
+    }
+
+    [Fact]
+    public async Task HandleCalcSexAsync_StoresSexAndAwaitsAge()
+    {
+        var h = CreateHarness();
+
+        var query = BuildCallbackQuery("lcs:f");
+        await h.Scenario.HandleCalcSexAsync(query, argument: "f", CancellationToken.None);
+
+        var context = h.States.Get(UserId);
+        Assert.Equal(BodySex.Female, context.CalcSex);
+        Assert.Equal(ConversationState.AwaitingCalcAge, context.State);
+    }
+
+    [Fact]
+    public async Task HandleCalcAgeAsync_WithoutSexInContext_TreatsAsStaleDialog()
+    {
+        var h = CreateHarness();
+        h.States.Get(UserId).State = ConversationState.AwaitingCalcAge;
+
+        await h.Scenario.HandleCalcAgeAsync(ChatId, UserId, "30", CancellationToken.None);
+
+        Assert.Equal(ConversationState.Idle, h.States.Get(UserId).State);
+        Assert.Contains(h.Bot.Sent, m => m.Text.Contains("неактуал"));
+    }
+
+    [Fact]
+    public async Task FullCalculatorWizard_CollectsAllStepsAndShowsResult()
+    {
+        var h = CreateHarness();
+        var context = h.States.Get(UserId);
+
+        await h.Scenario.HandleCalcSexAsync(BuildCallbackQuery("lcs:f"), "f", CancellationToken.None);
+        Assert.Equal(ConversationState.AwaitingCalcAge, context.State);
+
+        await h.Scenario.HandleCalcAgeAsync(ChatId, UserId, "30", CancellationToken.None);
+        Assert.Equal(ConversationState.AwaitingCalcHeight, context.State);
+
+        await h.Scenario.HandleCalcHeightAsync(ChatId, UserId, "165", CancellationToken.None);
+        Assert.Equal(ConversationState.AwaitingCalcWeight, context.State);
+
+        await h.Scenario.HandleCalcWeightAsync(ChatId, UserId, "65", CancellationToken.None);
+        Assert.Equal(ConversationState.AwaitingCalcActivity, context.State);
+
+        await h.Scenario.HandleCalcActivityAsync(BuildCallbackQuery("lca:moderate"), "moderate", CancellationToken.None);
+        Assert.Equal(ConversationState.AwaitingCalcGoal, context.State);
+        Assert.Equal(ActivityLevel.Moderate, context.CalcActivity);
+
+        await h.Scenario.HandleCalcGoalAsync(BuildCallbackQuery("lcg:lose"), "lose", CancellationToken.None);
+
+        Assert.Equal(ConversationState.Idle, context.State);
+        // Вводные данные из мастера остаются в контексте до применения/отмены — иначе «Применить» не сможет пересчитать.
+        Assert.Equal(BodySex.Female, context.CalcSex);
+        // Редактировались: подсказка возраста (после пола), подсказка цели (после активности), карточка результата.
+        Assert.Equal(3, h.Bot.Edited.Count);
+        Assert.Contains("Целевая калорийность", h.Bot.Edited[^1].Text);
+    }
+
+    [Fact]
+    public async Task HandleCalcApplyAsync_UpdatesMacroLimitsFromContextAndResetsDialog()
+    {
+        var h = CreateHarness();
+        var context = h.States.Get(UserId);
+        context.CalcSex = BodySex.Female;
+        context.CalcAge = 30;
+        context.CalcHeightCm = 165;
+        context.CalcWeightKg = 65m;
+        context.CalcActivity = ActivityLevel.Moderate;
+
+        h.Users.Setup(u => u.UpdateMacroLimitsAsync(UserId, 130m, 65m, It.IsAny<decimal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildUser());
+        h.Progress.Setup(p => p.GetCurrentCycleAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildProgress(2000, 400) with { TrackingMode = CalorieTrackingMode.Macros });
+
+        var query = BuildCallbackQuery("lcap:lose");
+        await h.Scenario.HandleCalcApplyAsync(query, argument: "lose", CancellationToken.None);
+
+        h.Users.Verify(u => u.UpdateMacroLimitsAsync(UserId, 130m, 65m, It.IsAny<decimal>(), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(ConversationState.Idle, context.State);
+        Assert.Null(context.CalcSex);
+        Assert.Single(h.Bot.Edited);
+    }
+
+    [Fact]
+    public async Task HandleCalcApplyAsync_WithMissingContext_DoesNotCallUpdate()
+    {
+        var h = CreateHarness(); // контекст пуст — мастер не пройден
+
+        var query = BuildCallbackQuery("lcap:lose");
+        await h.Scenario.HandleCalcApplyAsync(query, argument: "lose", CancellationToken.None);
+
+        h.Users.Verify(
+            u => u.UpdateMacroLimitsAsync(It.IsAny<long>(), It.IsAny<decimal>(), It.IsAny<decimal>(), It.IsAny<decimal>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
 }

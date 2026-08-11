@@ -517,4 +517,103 @@ public class FavoritesScenarioTests
 
         Assert.Single(h.Bot.Edited);
     }
+
+    // ------------------------------------------------------------------
+    // Навигация «назад» из вложенных экранов (не сразу в главное меню)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task ShowWaterListAsync_KeyboardHasBackToFavoritesButton_NotToMenu()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetByCategoryAsync(UserId, FavoriteCategoryKind.Water, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FavoriteProduct>());
+
+        await h.Scenario.ShowWaterListAsync(ChatId, UserId, page: 0, editMessageId: null, CancellationToken.None);
+
+        var keyboard = Assert.IsType<InlineKeyboardMarkup>(h.Bot.Sent[0].ReplyMarkup);
+        var buttons = keyboard.InlineKeyboard.SelectMany(row => row).ToList();
+        Assert.Contains(buttons, b => b.Text.Contains("Избранное") && b.CallbackData == "favm");
+        Assert.DoesNotContain(buttons, b => b.CallbackData == "menu");
+    }
+
+    [Fact]
+    public async Task ShowProductsInCategoryAsync_KeyboardHasBackToCategoriesButton_NotToMenu()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetByCategoryAsync(UserId, FavoriteCategoryKind.Product, 3, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FavoriteProduct>());
+        h.Favorites.Setup(f => f.GetProductCategoriesAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new ProductCategory { Id = 3, Name = "Крупы" } });
+
+        await h.Scenario.ShowProductsInCategoryAsync(ChatId, UserId, categoryId: 3, page: 0, editMessageId: null, CancellationToken.None);
+
+        var keyboard = Assert.IsType<InlineKeyboardMarkup>(h.Bot.Sent[0].ReplyMarkup);
+        var buttons = keyboard.InlineKeyboard.SelectMany(row => row).ToList();
+        Assert.Contains(buttons, b => b.Text.Contains("категориям") && b.CallbackData == "pcs");
+        Assert.DoesNotContain(buttons, b => b.CallbackData == "menu");
+    }
+
+    [Fact]
+    public async Task ShowProductCategoriesAsync_BrowseMode_KeyboardHasBackToFavoritesButton()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetProductCategoriesAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<ProductCategory>());
+        h.Favorites.Setup(f => f.GetByCategoryAsync(UserId, FavoriteCategoryKind.Product, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FavoriteProduct>());
+
+        await h.Scenario.ShowProductCategoriesAsync(ChatId, UserId, editMessageId: null, manageMode: false, CancellationToken.None);
+
+        var keyboard = Assert.IsType<InlineKeyboardMarkup>(h.Bot.Sent[0].ReplyMarkup);
+        var buttons = keyboard.InlineKeyboard.SelectMany(row => row).ToList();
+        Assert.Contains(buttons, b => b.CallbackData == "favm");
+    }
+
+    [Fact]
+    public async Task ShowProductCategoriesAsync_ManageMode_KeyboardHasBackToBrowseButton()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetProductCategoriesAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<ProductCategory>());
+        h.Favorites.Setup(f => f.GetByCategoryAsync(UserId, FavoriteCategoryKind.Product, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FavoriteProduct>());
+
+        await h.Scenario.ShowProductCategoriesAsync(ChatId, UserId, editMessageId: null, manageMode: true, CancellationToken.None);
+
+        var keyboard = Assert.IsType<InlineKeyboardMarkup>(h.Bot.Sent[0].ReplyMarkup);
+        var buttons = keyboard.InlineKeyboard.SelectMany(row => row).ToList();
+        Assert.Contains(buttons, b => b.CallbackData == "pcs");
+    }
+
+    [Fact]
+    public async Task ShowMenuFromCallbackAsync_SendsFavoritesMenuAndResetsState()
+    {
+        var h = CreateHarness();
+        h.States.Get(UserId).State = ConversationState.AwaitingProductCategoryName;
+
+        var query = BuildCallbackQuery("favm");
+        await h.Scenario.ShowMenuFromCallbackAsync(query, CancellationToken.None);
+
+        Assert.Equal(ConversationState.Idle, h.States.Get(UserId).State);
+        Assert.Single(h.Bot.Sent);
+        Assert.Contains("Избранное", h.Bot.Sent[0].Text);
+    }
+
+    [Fact]
+    public async Task ShowProductCategoriesFromCallbackAsync_ShowsBrowseModeList()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetProductCategoriesAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new ProductCategory { Id = 3, Name = "Крупы" } });
+        h.Favorites.Setup(f => f.GetByCategoryAsync(UserId, FavoriteCategoryKind.Product, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FavoriteProduct>());
+
+        var query = BuildCallbackQuery("pcs");
+        await h.Scenario.ShowProductCategoriesFromCallbackAsync(query, CancellationToken.None);
+
+        Assert.Single(h.Bot.Edited);
+        var keyboard = Assert.IsType<InlineKeyboardMarkup>(h.Bot.Edited[0].ReplyMarkup);
+        Assert.Contains(keyboard.InlineKeyboard.SelectMany(row => row), b => b.Text.Contains("Крупы"));
+    }
 }

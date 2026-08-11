@@ -28,6 +28,18 @@ public static partial class InputParser
     public const decimal MinLiters = 0.05m;
     public const decimal MaxLiters = 10m;
 
+    /// <summary>Разумные границы возраста для расчёта нормы КБЖУ.</summary>
+    public const int MinAge = 10;
+    public const int MaxAge = 100;
+
+    /// <summary>Разумные границы роста в см для расчёта нормы КБЖУ.</summary>
+    public const int MinHeightCm = 100;
+    public const int MaxHeightCm = 250;
+
+    /// <summary>Разумные границы веса в кг для расчёта нормы КБЖУ.</summary>
+    public const decimal MinWeightKg = 20m;
+    public const decimal MaxWeightKg = 300m;
+
     /// <summary>Вытаскиваю из строки все числа, разделитель дробной части допускаю любой.</summary>
     [GeneratedRegex(@"\d+(?:[.,]\d+)?", RegexOptions.CultureInvariant)]
     private static partial Regex NumberRegex();
@@ -212,6 +224,96 @@ public static partial class InputParser
         }
 
         liters = rounded;
+        return true;
+    }
+
+    /// <summary>Разбираю возраст для расчёта нормы КБЖУ.</summary>
+    public static bool TryParseAge(string? input, out int age, out string error)
+    {
+        age = 0;
+        error = string.Empty;
+
+        var matches = NumberRegex().Matches(input ?? string.Empty);
+        if (matches.Count != 1)
+        {
+            error = "Отправьте одно число — возраст полных лет. Например: <code>30</code>";
+            return false;
+        }
+
+        if (!TryParseDecimal(matches[0].Value, out var value))
+        {
+            error = "Не понял число. Отправьте возраст полных лет, например <code>30</code>.";
+            return false;
+        }
+
+        var rounded = (int)Math.Round(value, MidpointRounding.AwayFromZero);
+        if (rounded < MinAge || rounded > MaxAge)
+        {
+            error = $"Возраст должен быть от {MinAge} до {MaxAge} лет.";
+            return false;
+        }
+
+        age = rounded;
+        return true;
+    }
+
+    /// <summary>Разбираю рост в сантиметрах для расчёта нормы КБЖУ.</summary>
+    public static bool TryParseHeightCm(string? input, out int heightCm, out string error)
+    {
+        heightCm = 0;
+        error = string.Empty;
+
+        var matches = NumberRegex().Matches(input ?? string.Empty);
+        if (matches.Count != 1)
+        {
+            error = "Отправьте одно число — рост в сантиметрах. Например: <code>165</code>";
+            return false;
+        }
+
+        if (!TryParseDecimal(matches[0].Value, out var value))
+        {
+            error = "Не понял число. Отправьте рост в сантиметрах, например <code>165</code>.";
+            return false;
+        }
+
+        var rounded = (int)Math.Round(value, MidpointRounding.AwayFromZero);
+        if (rounded < MinHeightCm || rounded > MaxHeightCm)
+        {
+            error = $"Рост должен быть от {MinHeightCm} до {MaxHeightCm} см.";
+            return false;
+        }
+
+        heightCm = rounded;
+        return true;
+    }
+
+    /// <summary>Разбираю вес в килограммах для расчёта нормы КБЖУ.</summary>
+    public static bool TryParseWeightKg(string? input, out decimal weightKg, out string error)
+    {
+        weightKg = 0m;
+        error = string.Empty;
+
+        var matches = NumberRegex().Matches(input ?? string.Empty);
+        if (matches.Count != 1)
+        {
+            error = "Отправьте одно число — вес в килограммах. Например: <code>65</code>";
+            return false;
+        }
+
+        if (!TryParseDecimal(matches[0].Value, out var value))
+        {
+            error = "Не понял число. Отправьте вес в килограммах, например <code>65</code>.";
+            return false;
+        }
+
+        var rounded = Math.Round(value, 1);
+        if (rounded < MinWeightKg || rounded > MaxWeightKg)
+        {
+            error = $"Вес должен быть от {MinWeightKg:0.#} до {MaxWeightKg:0.#} кг.";
+            return false;
+        }
+
+        weightKg = rounded;
         return true;
     }
 

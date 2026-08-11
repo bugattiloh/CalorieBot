@@ -231,4 +231,73 @@ public class InputParserTests
         Assert.True(ok);
         Assert.Equal("200 г", servingSize);
     }
+
+    [Theory]
+    [InlineData(10)]
+    [InlineData(30)]
+    [InlineData(100)]
+    public void TryParseAge_AcceptsBoundaryAndTypicalValues(int value)
+    {
+        var ok = InputParser.TryParseAge(value.ToString(), out var age, out var error);
+
+        Assert.True(ok);
+        Assert.Equal(value, age);
+        Assert.Empty(error);
+    }
+
+    [Theory]
+    [InlineData(9)]
+    [InlineData(101)]
+    public void TryParseAge_RejectsOutOfRange(int value)
+    {
+        var ok = InputParser.TryParseAge(value.ToString(), out _, out var error);
+
+        Assert.False(ok);
+        Assert.NotEmpty(error);
+    }
+
+    [Theory]
+    [InlineData(100)]
+    [InlineData(165)]
+    [InlineData(250)]
+    public void TryParseHeightCm_AcceptsBoundaryAndTypicalValues(int value)
+    {
+        var ok = InputParser.TryParseHeightCm(value.ToString(), out var heightCm, out var error);
+
+        Assert.True(ok);
+        Assert.Equal(value, heightCm);
+        Assert.Empty(error);
+    }
+
+    [Theory]
+    [InlineData(99)]
+    [InlineData(251)]
+    public void TryParseHeightCm_RejectsOutOfRange(int value)
+    {
+        var ok = InputParser.TryParseHeightCm(value.ToString(), out _, out var error);
+
+        Assert.False(ok);
+        Assert.NotEmpty(error);
+    }
+
+    [Fact]
+    public void TryParseWeightKg_AcceptsDecimalValue()
+    {
+        var ok = InputParser.TryParseWeightKg("65.5", out var weightKg, out var error);
+
+        Assert.True(ok);
+        Assert.Equal(65.5m, weightKg);
+        Assert.Empty(error);
+    }
+
+    [Theory]
+    [InlineData("19")]
+    [InlineData("301")]
+    public void TryParseWeightKg_RejectsOutOfRange(string value)
+    {
+        var ok = InputParser.TryParseWeightKg(value, out _, out var error);
+
+        Assert.False(ok);
+        Assert.NotEmpty(error);
+    }
 }

@@ -1,4 +1,5 @@
 using CalorieBot.Core.Models;
+using CalorieBot.Core.Nutrition;
 
 namespace CalorieBot.Core.State;
 
@@ -53,6 +54,17 @@ public sealed class ConversationContext
     /// <summary>Id подкатегории «Продуктов», которую сейчас переименовывают. Null — значит, создаётся новая.</summary>
     public int? EditingProductCategoryId { get; set; }
 
+    /// <summary>Пол — первый шаг калькулятора нормы КБЖУ.</summary>
+    public BodySex? CalcSex { get; set; }
+
+    public int? CalcAge { get; set; }
+
+    public int? CalcHeightCm { get; set; }
+
+    public decimal? CalcWeightKg { get; set; }
+
+    public ActivityLevel? CalcActivity { get; set; }
+
     /// <summary>Собираю черновик из накопленного ввода.</summary>
     public ProductDraft ToDraft() => new()
     {
@@ -93,5 +105,10 @@ public sealed class ConversationContext
         PendingProductCategoryId = null;
         EditingDishId = null;
         EditingProductCategoryId = null;
+        CalcSex = null;
+        CalcAge = null;
+        CalcHeightCm = null;
+        CalcWeightKg = null;
+        CalcActivity = null;
     }
 }

@@ -69,6 +69,27 @@ public enum ConversationState
     /// <summary>Жду БЖУ ингредиента, добавляемого в блюдо.</summary>
     AwaitingDishIngredientMacros = 52,
 
+    /// <summary>Жду вес плавающей порции избранного продукта, выбранного как ингредиент блюда.</summary>
+    AwaitingDishIngredientGrams = 53,
+
     /// <summary>Жду название подкатегории «Продуктов» — новой или переименовываемой (см. <see cref="ConversationContext.EditingProductCategoryId"/>).</summary>
-    AwaitingProductCategoryName = 60
+    AwaitingProductCategoryName = 60,
+
+    /// <summary>Жду, пока пользователь нажмёт «Мужчина»/«Женщина» в калькуляторе нормы КБЖУ.</summary>
+    AwaitingCalcSex = 70,
+
+    /// <summary>Жду возраст в калькуляторе нормы КБЖУ.</summary>
+    AwaitingCalcAge = 71,
+
+    /// <summary>Жду рост в калькуляторе нормы КБЖУ.</summary>
+    AwaitingCalcHeight = 72,
+
+    /// <summary>Жду вес в калькуляторе нормы КБЖУ.</summary>
+    AwaitingCalcWeight = 73,
+
+    /// <summary>Жду выбор уровня активности в калькуляторе нормы КБЖУ.</summary>
+    AwaitingCalcActivity = 74,
+
+    /// <summary>Жду выбор цели (похудение/поддержание/набор) в калькуляторе нормы КБЖУ.</summary>
+    AwaitingCalcGoal = 75
 }

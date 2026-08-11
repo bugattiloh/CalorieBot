@@ -56,6 +56,21 @@ public class DishScenarioTests
     }
 
     [Fact]
+    public async Task ShowListAsync_KeyboardHasBackToFavoritesButton_NotToMenu()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetByCategoryAsync(UserId, FavoriteCategoryKind.Dish, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FavoriteProduct>());
+
+        await h.Scenario.ShowListAsync(ChatId, UserId, page: 0, editMessageId: null, CancellationToken.None);
+
+        var keyboard = Assert.IsType<InlineKeyboardMarkup>(h.Bot.Sent[0].ReplyMarkup);
+        var buttons = keyboard.InlineKeyboard.SelectMany(row => row).ToList();
+        Assert.Contains(buttons, b => b.CallbackData == "favm");
+        Assert.DoesNotContain(buttons, b => b.CallbackData == "menu");
+    }
+
+    [Fact]
     public async Task StartCreateAsync_AwaitsDishName()
     {
         var h = CreateHarness();
@@ -100,16 +115,113 @@ public class DishScenarioTests
     }
 
     [Fact]
-    public async Task StartAddIngredientAsync_SetsEditingDishIdAndAwaitsName()
+    public async Task StartAddIngredientAsync_ShowsSourceChoice()
     {
         var h = CreateHarness();
         var query = BuildCallbackQuery("dai:7");
 
         await h.Scenario.StartAddIngredientAsync(query, argument: "7", CancellationToken.None);
 
+        Assert.Single(h.Bot.Edited);
+        var keyboard = Assert.IsType<InlineKeyboardMarkup>(h.Bot.Edited[0].ReplyMarkup);
+        Assert.Contains(keyboard.InlineKeyboard.SelectMany(row => row), b => b.Text.Contains("избранного"));
+    }
+
+    [Fact]
+    public async Task StartAddCustomIngredientAsync_SetsEditingDishIdAndAwaitsName()
+    {
+        var h = CreateHarness();
+        var query = BuildCallbackQuery("dic:7");
+
+        await h.Scenario.StartAddCustomIngredientAsync(query, argument: "7", CancellationToken.None);
+
         var context = h.States.Get(UserId);
         Assert.Equal(7, context.EditingDishId);
         Assert.Equal(ConversationState.AwaitingDishIngredientName, context.State);
+    }
+
+    [Fact]
+    public async Task ShowFavoriteIngredientPickerAsync_ListsProductFavoritesOnly()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetAllAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new FavoriteProduct { Id = 1, Name = "Гречка", CategoryKind = FavoriteCategoryKind.Product },
+                new FavoriteProduct { Id = 2, Name = "Вода", CategoryKind = FavoriteCategoryKind.Water },
+                new FavoriteProduct { Id = 3, Name = "Салат", CategoryKind = FavoriteCategoryKind.Dish }
+            });
+
+        var query = BuildCallbackQuery("diff:7");
+        await h.Scenario.ShowFavoriteIngredientPickerAsync(query, argument: "7", CancellationToken.None);
+
+        Assert.Single(h.Bot.Edited);
+        var keyboard = Assert.IsType<InlineKeyboardMarkup>(h.Bot.Edited[0].ReplyMarkup);
+        var labels = keyboard.InlineKeyboard.SelectMany(row => row).Select(b => b.Text).ToList();
+        Assert.Contains(labels, l => l.Contains("Гречка"));
+        Assert.DoesNotContain(labels, l => l.Contains("Вода"));
+        Assert.DoesNotContain(labels, l => l.Contains("Салат"));
+    }
+
+    [Fact]
+    public async Task HandlePickFavoriteIngredientAsync_WithFixedServing_AddsDirectly()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetAsync(UserId, 1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FavoriteProduct { Id = 1, Name = "Батончик", IsFixedServing = true, CategoryKind = FavoriteCategoryKind.Product, Calories = 200 });
+        h.Favorites.Setup(f => f.AddDishIngredientAsync(UserId, 7, It.IsAny<ProductDraft>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FavoriteProduct { Id = 7, Name = "Салат", CategoryKind = FavoriteCategoryKind.Dish, Calories = 200 });
+        h.Favorites.Setup(f => f.GetDishIngredientsAsync(UserId, 7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new DishIngredient { Id = 1, Name = "Батончик", Calories = 200 } });
+
+        var query = BuildCallbackQuery("dipf:7:1");
+        await h.Scenario.HandlePickFavoriteIngredientAsync(query, argument: "7:1", CancellationToken.None);
+
+        h.Favorites.Verify(f => f.AddDishIngredientAsync(UserId, 7, It.IsAny<ProductDraft>(), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Single(h.Bot.Edited);
+        Assert.Contains("Салат", h.Bot.Edited[0].Text);
+    }
+
+    [Fact]
+    public async Task HandlePickFavoriteIngredientAsync_WithFloatingServing_AsksForGrams()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetAsync(UserId, 1, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FavoriteProduct { Id = 1, Name = "Рис", IsFixedServing = false, CategoryKind = FavoriteCategoryKind.Product, Proteins = 7, Fats = 1, Carbs = 78 });
+
+        var query = BuildCallbackQuery("dipf:7:1");
+        await h.Scenario.HandlePickFavoriteIngredientAsync(query, argument: "7:1", CancellationToken.None);
+
+        var context = h.States.Get(UserId);
+        Assert.Equal(7, context.EditingDishId);
+        Assert.Equal("Рис", context.ProductName);
+        Assert.Equal(ConversationState.AwaitingDishIngredientGrams, context.State);
+        h.Favorites.Verify(f => f.AddDishIngredientAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<ProductDraft>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HandleIngredientGramsAsync_ScalesMacrosAndAddsIngredient()
+    {
+        var h = CreateHarness();
+        var context = h.States.Get(UserId);
+        context.EditingDishId = 7;
+        context.ProductName = "Рис";
+        context.Proteins = 7;
+        context.Fats = 1;
+        context.Carbs = 78;
+        context.State = ConversationState.AwaitingDishIngredientGrams;
+
+        h.Favorites.Setup(f => f.AddDishIngredientAsync(UserId, 7, It.IsAny<ProductDraft>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FavoriteProduct { Id = 7, Name = "Салат", CategoryKind = FavoriteCategoryKind.Dish });
+        h.Favorites.Setup(f => f.GetDishIngredientsAsync(UserId, 7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<DishIngredient>());
+
+        await h.Scenario.HandleIngredientGramsAsync(ChatId, UserId, "150", CancellationToken.None);
+
+        h.Favorites.Verify(f => f.AddDishIngredientAsync(
+                UserId, 7, It.Is<ProductDraft>(d => d.Proteins == 10.5m && d.ServingSize == "150 г"), It.IsAny<CancellationToken>()),
+            Times.Once);
+        Assert.Null(h.States.Get(UserId).EditingDishId);
     }
 
     [Fact]

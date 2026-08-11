@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Text;
 using CalorieBot.Core.Models;
+using CalorieBot.Core.Nutrition;
 using CalorieBot.Core.Validation;
 using CalorieBot.Data.Entities;
 
@@ -520,7 +521,50 @@ public static class Texts
     public const string AskLimitMode =
         "Как вам удобнее вести учёт?\n\n" +
         "📐 <b>По калориям</b> — задаёте дневной максимум ккал, БЖУ считаются справочно (30/30/40 %).\n" +
-        "🥩 <b>По БЖУ</b> — задаёте лимиты белков/жиров/углеводов напрямую, калории — расчётная величина.";
+        "🥩 <b>По БЖУ</b> — задаёте лимиты белков/жиров/углеводов напрямую, калории — расчётная величина.\n" +
+        "🧮 <b>Рассчитать по формуле</b> — отвечаете на несколько вопросов о себе, а лимит по БЖУ считаю сам.";
+
+    /// <summary>Первый шаг калькулятора нормы КБЖУ.</summary>
+    public const string AskCalcSex =
+        "🧮 <b>Расчёт нормы КБЖУ</b>\n\nВаш пол? Нужен для формулы базового обмена веществ.";
+
+    /// <summary>Спрашиваю возраст.</summary>
+    public const string AskCalcAge =
+        "Сколько вам полных лет? Отправьте число, например <code>30</code>.";
+
+    /// <summary>Спрашиваю рост.</summary>
+    public const string AskCalcHeight =
+        "Рост в сантиметрах? Отправьте число, например <code>165</code>.";
+
+    /// <summary>Спрашиваю вес.</summary>
+    public const string AskCalcWeight =
+        "Вес в килограммах? Отправьте число, например <code>65</code>.";
+
+    /// <summary>Спрашиваю уровень активности.</summary>
+    public const string AskCalcActivity =
+        "Какой у вас уровень физической активности?";
+
+    /// <summary>Спрашиваю цель по весу.</summary>
+    public const string AskCalcGoal =
+        "Какая у вас цель?";
+
+    /// <summary>Итог расчёта: промежуточные величины и готовые БЖУ в граммах.</summary>
+    public static string CalcResultCard(MacroGoal result)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("🧮 <b>Расчёт нормы КБЖУ</b>");
+        builder.AppendLine();
+        builder.AppendLine($"Базовый обмен (BMR): {Num(result.Bmr)} ккал");
+        builder.AppendLine($"Суточная норма с учётом активности (TDEE): {Num(result.Tdee)} ккал");
+        builder.AppendLine();
+        builder.AppendLine($"🔥 Целевая калорийность: <b>{result.TargetCalories} ккал</b>");
+        builder.AppendLine(
+            $"Б {Num(result.Proteins)} г · Ж {Num(result.Fats)} г · У {Num(result.Carbs)} г");
+        builder.AppendLine();
+        builder.Append("Применить результат как новый лимит по БЖУ, или отменить и оставить всё как есть?");
+
+        return builder.ToString();
+    }
 
     /// <summary>Запрос нового лимита калорий.</summary>
     public static string AskCalorieLimit(int currentLimit) =>
@@ -681,6 +725,15 @@ public static class Texts
     /// <summary>Спрашиваю название ингредиента, добавляемого в блюдо.</summary>
     public const string AskIngredientName =
         "Название ингредиента? Отправьте сообщением.";
+
+    /// <summary>Выбор источника ингредиента — из избранного или свой продукт.</summary>
+    public const string AskIngredientSource =
+        "Откуда взять ингредиент?\n\n⭐ <b>Из избранного</b> — выбрать уже сохранённый продукт.\n" +
+        "🔍 <b>Свой продукт</b> — ввести название и БЖУ вручную.";
+
+    /// <summary>Заголовок списка избранных продуктов при выборе ингредиента для блюда.</summary>
+    public static string PickIngredientFromFavoritesHeader(int totalFavorites) =>
+        $"⭐ <b>Выберите продукт</b> ({totalFavorites})\n\nЕсли порция плавающая (на 100 г), после выбора спрошу вес.";
 
     /// <summary>Подпись кнопки ингредиента в карточке блюда — тап по ней запрашивает удаление.</summary>
     public static string IngredientButtonLabel(DishIngredient ingredient)

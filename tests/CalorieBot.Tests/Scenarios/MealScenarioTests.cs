@@ -32,6 +32,9 @@ public class MealScenarioTests
         var states = new MemoryConversationStateStore(new MemoryCache(new MemoryCacheOptions()));
         var favorites = new Mock<IFavoriteProductService>();
         var foodLog = new Mock<IFoodLogService>();
+        // По умолчанию цикл пуст — тесты дубликатов сами переопределяют этот setup.
+        foodLog.Setup(f => f.GetCurrentCycleAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FoodLogEntry>());
         var progress = new Mock<IProgressService>();
 
         var scenario = new MealScenario(
@@ -159,6 +162,44 @@ public class MealScenarioTests
     }
 
     [Fact]
+    public async Task HandleServingGramsAsync_WithLiterServing_ScalesMacrosByLitersAndFormatsServingSizeInLiters()
+    {
+        var h = CreateHarness();
+        var context = h.States.Get(UserId);
+        context.ProductName = "Морс";
+        context.MacrosPerHundredGrams = true;
+        context.IsLiterServing = true;
+        context.Proteins = 0.2m;
+        context.Fats = 0m;
+        context.Carbs = 10m;
+        context.State = ConversationState.AwaitingMealServingGrams;
+
+        await h.Scenario.HandleServingGramsAsync(ChatId, UserId, "0.5", CancellationToken.None);
+
+        // На 0.5 л: Б 0.1, Ж 0, У 5.
+        Assert.Equal(0.1m, context.Proteins);
+        Assert.Equal(0m, context.Fats);
+        Assert.Equal(5m, context.Carbs);
+        Assert.Equal("0.5 л", context.ServingSize);
+        Assert.Equal(ConversationState.Idle, context.State);
+    }
+
+    [Fact]
+    public async Task HandleServingGramsAsync_WithLiterServing_RejectsPlainGramsFormatOutOfLiterRange()
+    {
+        var h = CreateHarness();
+        var context = h.States.Get(UserId);
+        context.ProductName = "Морс";
+        context.IsLiterServing = true;
+        context.State = ConversationState.AwaitingMealServingGrams;
+
+        await h.Scenario.HandleServingGramsAsync(ChatId, UserId, "150", CancellationToken.None); // 150 л — явно за пределами разумного
+
+        Assert.Equal(ConversationState.AwaitingMealServingGrams, context.State);
+        Assert.Single(h.Bot.Sent);
+    }
+
+    [Fact]
     public async Task HandleServingGramsAsync_WithInvalidWeight_SendsValidationErrorAndKeepsWaiting()
     {
         var h = CreateHarness();
@@ -235,6 +276,26 @@ public class MealScenarioTests
     }
 
     [Fact]
+    public async Task HandleFavoritePickedAsync_WithWaterFavorite_AsksForLitersInsteadOfGrams()
+    {
+        var h = CreateHarness();
+        var water = new FavoriteProduct
+        {
+            Id = 4, UserId = UserId, Name = "Вода", Calories = 0, Proteins = 0, Fats = 0, Carbs = 0,
+            IsFixedServing = false, CategoryKind = FavoriteCategoryKind.Water
+        };
+        h.Favorites.Setup(f => f.GetAsync(UserId, 4, It.IsAny<CancellationToken>())).ReturnsAsync(water);
+
+        var query = BuildCallbackQuery(data: "pf:4");
+        await h.Scenario.HandleFavoritePickedAsync(query, argument: "4", CancellationToken.None);
+
+        var context = h.States.Get(UserId);
+        Assert.True(context.IsLiterServing);
+        Assert.Equal(ConversationState.AwaitingMealServingGrams, context.State);
+        Assert.Contains("литр", h.Bot.Edited[0].Text);
+    }
+
+    [Fact]
     public async Task HandleFavoritePickedAsync_WithUnknownFavorite_AnswersWithAlertAndDoesNotEditMessage()
     {
         var h = CreateHarness();
@@ -281,6 +342,86 @@ public class MealScenarioTests
 
         await h.Scenario.HandleMealTypeAsync(query, argument: "2", CancellationToken.None);
 
+        h.FoodLog.Verify(f => f.LogAsync(It.IsAny<long>(), It.IsAny<ProductDraft>(), It.IsAny<MealType>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Single(h.Bot.AnsweredCallbackIds);
+    }
+
+    [Fact]
+    public async Task HandleMealTypeAsync_WithDuplicateNameInCurrentCycle_AsksForConfirmationInsteadOfLogging()
+    {
+        var h = CreateHarness();
+        var context = h.States.Get(UserId);
+        context.Apply(ProductDraft.FromMacros("Гречка", 12, 5, 30));
+
+        var existing = new FoodLogEntry { Id = 7, UserId = UserId, ProductName = "гречка", Calories = 200, MealType = MealType.Breakfast };
+        h.FoodLog.Setup(f => f.GetCurrentCycleAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { existing });
+
+        var query = BuildCallbackQuery(data: "mt:2");
+
+        await h.Scenario.HandleMealTypeAsync(query, argument: "2", CancellationToken.None);
+
+        h.FoodLog.Verify(f => f.LogAsync(It.IsAny<long>(), It.IsAny<ProductDraft>(), It.IsAny<MealType>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
+        h.FoodLog.Verify(f => f.DeleteAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        // Диалог не завершён — продукт всё ещё в контексте, ждём ответа на предупреждение.
+        Assert.Equal("Гречка", h.States.Get(UserId).ProductName);
+        Assert.Single(h.Bot.Edited);
+    }
+
+    [Fact]
+    public async Task HandleDuplicateMealConfirmAsync_Yes_DeletesOldEntryThenLogsNew()
+    {
+        var h = CreateHarness();
+        var context = h.States.Get(UserId);
+        context.Apply(ProductDraft.FromMacros("Гречка", 12, 5, 30));
+
+        var loggedEntry = new FoodLogEntry { Id = 10, UserId = UserId, ProductName = "Гречка", Calories = 213, MealType = MealType.Lunch };
+        h.FoodLog.Setup(f => f.LogAsync(UserId, It.IsAny<ProductDraft>(), MealType.Lunch, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(loggedEntry);
+        h.Progress.Setup(p => p.GetCurrentCycleAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(EmptyProgress() with { ConsumedCalories = 213 });
+
+        var query = BuildCallbackQuery(data: "dmc:yes:2:7");
+
+        await h.Scenario.HandleDuplicateMealConfirmAsync(query, argument: "yes:2:7", CancellationToken.None);
+
+        h.FoodLog.Verify(f => f.DeleteAsync(UserId, 7, It.IsAny<CancellationToken>()), Times.Once);
+        h.FoodLog.Verify(f => f.LogAsync(UserId, It.IsAny<ProductDraft>(), MealType.Lunch, null, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(ConversationState.Idle, h.States.Get(UserId).State);
+        Assert.Null(h.States.Get(UserId).ProductName);
+    }
+
+    [Fact]
+    public async Task HandleDuplicateMealConfirmAsync_No_LogsNewEntryWithoutDeletingOld()
+    {
+        var h = CreateHarness();
+        var context = h.States.Get(UserId);
+        context.Apply(ProductDraft.FromMacros("Гречка", 12, 5, 30));
+
+        var loggedEntry = new FoodLogEntry { Id = 11, UserId = UserId, ProductName = "Гречка", Calories = 213, MealType = MealType.Lunch };
+        h.FoodLog.Setup(f => f.LogAsync(UserId, It.IsAny<ProductDraft>(), MealType.Lunch, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(loggedEntry);
+        h.Progress.Setup(p => p.GetCurrentCycleAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(EmptyProgress() with { ConsumedCalories = 213 });
+
+        var query = BuildCallbackQuery(data: "dmc:no:2:7");
+
+        await h.Scenario.HandleDuplicateMealConfirmAsync(query, argument: "no:2:7", CancellationToken.None);
+
+        h.FoodLog.Verify(f => f.DeleteAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        h.FoodLog.Verify(f => f.LogAsync(UserId, It.IsAny<ProductDraft>(), MealType.Lunch, null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task HandleDuplicateMealConfirmAsync_WithStaleDialog_DoesNotLogOrDelete()
+    {
+        var h = CreateHarness(); // контекст пуст — ProductName не задан
+
+        var query = BuildCallbackQuery(data: "dmc:yes:2:7");
+
+        await h.Scenario.HandleDuplicateMealConfirmAsync(query, argument: "yes:2:7", CancellationToken.None);
+
+        h.FoodLog.Verify(f => f.DeleteAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         h.FoodLog.Verify(f => f.LogAsync(It.IsAny<long>(), It.IsAny<ProductDraft>(), It.IsAny<MealType>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Single(h.Bot.AnsweredCallbackIds);
     }

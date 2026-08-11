@@ -2,6 +2,7 @@ using CalorieBot.Api.Bot.UI;
 using CalorieBot.Core.Services;
 using CalorieBot.Core.State;
 using CalorieBot.Core.Time;
+using Telegram.Bot.Types;
 
 namespace CalorieBot.Api.Bot.Scenarios;
 
@@ -39,6 +40,22 @@ public sealed class ProgressScenario
         var progress = await _progress.GetCurrentCycleAsync(userId, ct);
         var entries = await _foodLog.GetCurrentCycleAsync(userId, ct);
 
-        await _messenger.SendAsync(chatId, Texts.Progress(progress, entries, _clock.Offset), Keyboards.MainMenu, ct);
+        await _messenger.SendAsync(chatId, Texts.Progress(progress, entries, _clock.Offset), Keyboards.ProgressReportChoice, ct);
+    }
+
+    /// <summary>Отчёт за неделю/месяц по кнопке под экраном прогресса — отправляю отдельным сообщением.</summary>
+    public async Task HandlePeriodReportAsync(CallbackQuery query, string? argument, CancellationToken ct)
+    {
+        if (query.Message is null || !int.TryParse(argument, out var days) || (days != 7 && days != 30))
+        {
+            await _messenger.AnswerAsync(query, Texts.StaleDialog, ct: ct);
+            return;
+        }
+
+        var userId = query.From.Id;
+        var report = await _progress.GetReportAsync(userId, days, ct);
+
+        await _messenger.AnswerAsync(query, ct: ct);
+        await _messenger.SendAsync(query.Message.Chat.Id, Texts.PeriodReport(report), replyMarkup: null, ct);
     }
 }

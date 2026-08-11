@@ -59,15 +59,43 @@ public class InputParserTests
     }
 
     [Fact]
-    public void TryParseMacros_ParsesThreeNumbersWithMixedSeparators()
+    public void TryParseMacros_ParsesThreeIntegersSeparatedBySpaces()
     {
-        var ok = InputParser.TryParseMacros("12,5 5.0;30", out var proteins, out var fats, out var carbs, out var error);
+        var ok = InputParser.TryParseMacros("12 5 1", out var proteins, out var fats, out var carbs, out var error);
+
+        Assert.True(ok);
+        Assert.Equal(12m, proteins);
+        Assert.Equal(5m, fats);
+        Assert.Equal(1m, carbs);
+        Assert.Empty(error);
+    }
+
+    [Theory]
+    [InlineData("12.5 5.0 1.2")]
+    [InlineData("12,5 5,0 1,2")]
+    public void TryParseMacros_AllowsExactlyOneDecimalDigit(string input)
+    {
+        var ok = InputParser.TryParseMacros(input, out var proteins, out var fats, out var carbs, out var error);
 
         Assert.True(ok);
         Assert.Equal(12.5m, proteins);
         Assert.Equal(5.0m, fats);
-        Assert.Equal(30m, carbs);
+        Assert.Equal(1.2m, carbs);
         Assert.Empty(error);
+    }
+
+    [Theory]
+    [InlineData("12,5 5.0;30")] // старый формат со смешанными разделителями между числами больше не поддерживается
+    [InlineData("12.55 5 1")] // два знака после запятой
+    [InlineData("-12 5 1")] // отрицательное число
+    [InlineData("12 -5 1")]
+    [InlineData("12 5 1.")] // точка без цифры после
+    public void TryParseMacros_RejectsNonStrictFormat(string input)
+    {
+        var ok = InputParser.TryParseMacros(input, out _, out _, out _, out var error);
+
+        Assert.False(ok);
+        Assert.NotEmpty(error);
     }
 
     [Theory]

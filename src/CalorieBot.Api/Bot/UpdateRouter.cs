@@ -18,6 +18,7 @@ public sealed class UpdateRouter
     private readonly IConversationStateStore _states;
     private readonly MealScenario _meal;
     private readonly FavoritesScenario _favorites;
+    private readonly DishScenario _dish;
     private readonly LimitScenario _limit;
     private readonly ProgressScenario _progress;
     private readonly CycleScenario _cycle;
@@ -29,6 +30,7 @@ public sealed class UpdateRouter
         IConversationStateStore states,
         MealScenario meal,
         FavoritesScenario favorites,
+        DishScenario dish,
         LimitScenario limit,
         ProgressScenario progress,
         CycleScenario cycle,
@@ -39,6 +41,7 @@ public sealed class UpdateRouter
         _states = states;
         _meal = meal;
         _favorites = favorites;
+        _dish = dish;
         _limit = limit;
         _progress = progress;
         _cycle = cycle;
@@ -136,6 +139,38 @@ public sealed class UpdateRouter
                 await _limit.HandleNewMacroLimitsAsync(chatId, userId, text, ct);
                 return;
 
+            case ConversationState.AwaitingCycleEntryName:
+                await _cycle.HandleEntryNameAsync(chatId, userId, text, ct);
+                return;
+
+            case ConversationState.AwaitingCycleEntryMacros:
+                await _cycle.HandleEntryMacrosAsync(chatId, userId, text, ct);
+                return;
+
+            case ConversationState.AwaitingWaterName:
+                await _favorites.HandleWaterNameAsync(chatId, userId, text, ct);
+                return;
+
+            case ConversationState.AwaitingWaterMacros:
+                await _favorites.HandleWaterMacrosAsync(chatId, userId, text, ct);
+                return;
+
+            case ConversationState.AwaitingProductCategoryName:
+                await _favorites.HandleCategoryNameAsync(chatId, userId, text, ct);
+                return;
+
+            case ConversationState.AwaitingDishName:
+                await _dish.HandleNameAsync(chatId, userId, text, ct);
+                return;
+
+            case ConversationState.AwaitingDishIngredientName:
+                await _dish.HandleIngredientNameAsync(chatId, userId, text, ct);
+                return;
+
+            case ConversationState.AwaitingDishIngredientMacros:
+                await _dish.HandleIngredientMacrosAsync(chatId, userId, text, ct);
+                return;
+
             default:
                 await _messenger.SendAsync(chatId, Texts.OnlyButtons, Keyboards.MainMenu, ct);
                 return;
@@ -181,13 +216,17 @@ public sealed class UpdateRouter
                 await _meal.StartNewProductAsync(chatId, userId, ct);
                 return true;
 
-            // Подменю «Любимые продукты».
-            case Buttons.AddFavorite:
-                await _favorites.StartAddAsync(chatId, userId, ct);
+            // Подменю «Избранное» — три группы.
+            case Buttons.Water:
+                await _favorites.ShowWaterListAsync(chatId, userId, page: 0, editMessageId: null, ct);
                 return true;
 
-            case Buttons.MyProducts:
-                await _favorites.ShowListAsync(chatId, userId, page: 0, editMessageId: null, ct);
+            case Buttons.Dishes:
+                await _dish.ShowListAsync(chatId, userId, page: 0, editMessageId: null, ct);
+                return true;
+
+            case Buttons.Products:
+                await _favorites.ShowProductCategoriesAsync(chatId, userId, editMessageId: null, manageMode: false, ct);
                 return true;
 
             case Buttons.DeleteFavorite:
@@ -238,6 +277,10 @@ public sealed class UpdateRouter
                 await _meal.HandleMealTypeAsync(query, argument, ct);
                 return;
 
+            case Callbacks.DuplicateMealConfirm:
+                await _meal.HandleDuplicateMealConfirmAsync(query, argument, ct);
+                return;
+
             case Callbacks.MealMacrosMode:
                 await _meal.HandleMacrosModeAsync(query, argument, ct);
                 return;
@@ -271,6 +314,30 @@ public sealed class UpdateRouter
                 await _cycle.ShowHistoryAsync(chatId, userId, ParsePage(argument), messageId, ct);
                 return;
 
+            case Callbacks.CycleDetails:
+                await _cycle.HandleCycleDetailsAsync(query, argument, ct);
+                return;
+
+            case Callbacks.CycleEntryDeleteRequest:
+                await _cycle.HandleEntryDeleteRequestAsync(query, argument, ct);
+                return;
+
+            case Callbacks.CycleEntryDeleteConfirm:
+                await _cycle.HandleEntryDeleteConfirmAsync(query, argument, ct);
+                return;
+
+            case Callbacks.CycleAddEntry:
+                await _cycle.StartAddEntryAsync(query, argument, ct);
+                return;
+
+            case Callbacks.CycleEntryMealType:
+                await _cycle.HandleEntryMealTypeAsync(query, argument, ct);
+                return;
+
+            case Callbacks.PeriodReport:
+                await _progress.HandlePeriodReportAsync(query, argument, ct);
+                return;
+
             case Callbacks.PickFavorite:
                 await _meal.HandleFavoritePickedAsync(query, argument, ct);
                 return;
@@ -280,9 +347,78 @@ public sealed class UpdateRouter
                 await _meal.ShowFavoritesAsync(chatId, userId, ParsePage(argument), messageId, ct);
                 return;
 
-            case Callbacks.ListPage:
+            case Callbacks.WaterPage:
                 await _messenger.AnswerAsync(query, ct: ct);
-                await _favorites.ShowListAsync(chatId, userId, ParsePage(argument), messageId, ct);
+                await _favorites.ShowWaterListAsync(chatId, userId, ParsePage(argument), messageId, ct);
+                return;
+
+            case Callbacks.WaterAdd:
+                await _favorites.StartAddWaterAsync(query, ct);
+                return;
+
+            case Callbacks.DishPage:
+                await _messenger.AnswerAsync(query, ct: ct);
+                await _dish.ShowListAsync(chatId, userId, ParsePage(argument), messageId, ct);
+                return;
+
+            case Callbacks.DishAdd:
+                await _dish.StartCreateAsync(query, ct);
+                return;
+
+            case Callbacks.DishDetails:
+                await _dish.ShowDetailsAsync(query, argument, ct);
+                return;
+
+            case Callbacks.DishAddIngredient:
+                await _dish.StartAddIngredientAsync(query, argument, ct);
+                return;
+
+            case Callbacks.DishIngredientDeleteRequest:
+                await _dish.HandleIngredientDeleteRequestAsync(query, argument, ct);
+                return;
+
+            case Callbacks.DishIngredientDeleteConfirm:
+                await _dish.HandleIngredientDeleteConfirmAsync(query, argument, ct);
+                return;
+
+            case Callbacks.ProductCategoryPick:
+                await _favorites.HandleProductCategoryPickAsync(query, argument, ct);
+                return;
+
+            case Callbacks.ProductAddHere:
+                await _favorites.StartAddProductAsync(query, argument, ct);
+                return;
+
+            case Callbacks.ProductCategoryNew:
+                await _favorites.StartCreateCategoryAsync(query, ct);
+                return;
+
+            case Callbacks.ProductCategoryManage:
+                await _favorites.ShowCategoryManageListAsync(query, ct);
+                return;
+
+            case Callbacks.ProductCategoryManagePick:
+                await _favorites.ShowCategoryManageCardAsync(query, argument, ct);
+                return;
+
+            case Callbacks.ProductCategoryRename:
+                await _favorites.StartRenameCategoryAsync(query, argument, ct);
+                return;
+
+            case Callbacks.ProductCategoryDelete:
+                await _favorites.HandleCategoryDeleteRequestAsync(query, argument, ct);
+                return;
+
+            case Callbacks.ProductCategoryDeleteConfirm:
+                await _favorites.HandleCategoryDeleteConfirmAsync(query, argument, ct);
+                return;
+
+            case Callbacks.FavoriteMoveCategory:
+                await _favorites.StartMoveCategoryAsync(query, argument, ct);
+                return;
+
+            case Callbacks.FavoriteMoveCategoryConfirm:
+                await _favorites.HandleMoveCategoryConfirmAsync(query, argument, ct);
                 return;
 
             case Callbacks.DeletePage:
@@ -316,7 +452,9 @@ public sealed class UpdateRouter
 
                 if (string.Equals(argument, "fav", StringComparison.Ordinal))
                 {
-                    await _favorites.StartAddAsync(chatId, userId, ct);
+                    // Продукт мог быть добавлен в любую из трёх групп — однозначно повторить
+                    // тот же shortcut нельзя, поэтому возвращаю в меню «Избранное» выбрать заново.
+                    await _favorites.ShowMenuAsync(chatId, userId, ct);
                 }
                 else
                 {

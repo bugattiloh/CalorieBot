@@ -13,7 +13,7 @@ using Telegram.Bot.Types.ReplyMarkups;
 
 namespace CalorieBot.Tests.Scenarios;
 
-/// <summary>Сценарий «⭐ Любимые продукты»: добавление, просмотр, удаление и редактирование.</summary>
+/// <summary>Сценарий «⭐ Избранное»: три группы (Вода/Готовые блюда/Продукты с подкатегориями), добавление, удаление, перенос.</summary>
 public class FavoritesScenarioTests
 {
     private const long ChatId = 100;
@@ -33,14 +33,139 @@ public class FavoritesScenarioTests
         return new Harness(scenario, bot, states, favorites);
     }
 
+    private static CallbackQuery BuildCallbackQuery(string data = "skp") => new()
+    {
+        Id = "cb-1",
+        From = new User { Id = UserId, FirstName = "Test" },
+        Message = new Message { Id = 55, Chat = new Chat { Id = ChatId } },
+        Data = data
+    };
+
+    // ------------------------------------------------------------------
+    // Вода
+    // ------------------------------------------------------------------
+
     [Fact]
-    public async Task StartAddAsync_AwaitsProductName()
+    public async Task ShowWaterListAsync_SeedsWaterAndListsItems()
     {
         var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetByCategoryAsync(UserId, FavoriteCategoryKind.Water, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new FavoriteProduct { Id = 1, Name = "Вода", CategoryKind = FavoriteCategoryKind.Water } });
 
-        await h.Scenario.StartAddAsync(ChatId, UserId, CancellationToken.None);
+        await h.Scenario.ShowWaterListAsync(ChatId, UserId, page: 0, editMessageId: null, CancellationToken.None);
 
-        Assert.Equal(ConversationState.AwaitingFavoriteName, h.States.Get(UserId).State);
+        h.Favorites.Verify(f => f.EnsureWaterSeedAsync(UserId, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Single(h.Bot.Sent);
+        var keyboard = Assert.IsType<InlineKeyboardMarkup>(h.Bot.Sent[0].ReplyMarkup);
+        Assert.Contains(keyboard.InlineKeyboard.SelectMany(row => row), b => b.Text.Contains("Вода"));
+    }
+
+    [Fact]
+    public async Task StartAddWaterAsync_AwaitsWaterName()
+    {
+        var h = CreateHarness();
+        var query = BuildCallbackQuery("wad");
+
+        await h.Scenario.StartAddWaterAsync(query, CancellationToken.None);
+
+        Assert.Equal(ConversationState.AwaitingWaterName, h.States.Get(UserId).State);
+        Assert.Single(h.Bot.Edited);
+    }
+
+    [Fact]
+    public async Task HandleWaterNameAsync_WithValidName_AsksMacrosPerLiter()
+    {
+        var h = CreateHarness();
+        h.States.Get(UserId).State = ConversationState.AwaitingWaterName;
+
+        await h.Scenario.HandleWaterNameAsync(ChatId, UserId, "Морс", CancellationToken.None);
+
+        var context = h.States.Get(UserId);
+        Assert.Equal("Морс", context.ProductName);
+        Assert.Equal(ConversationState.AwaitingWaterMacros, context.State);
+        Assert.Contains("литр", h.Bot.Sent[0].Text);
+    }
+
+    [Fact]
+    public async Task HandleWaterMacrosAsync_SavesWithWaterCategoryAndFloatingServing()
+    {
+        var h = CreateHarness();
+        var context = h.States.Get(UserId);
+        context.ProductName = "Морс";
+        context.State = ConversationState.AwaitingWaterMacros;
+
+        h.Favorites.Setup(f => f.AddOrUpdateAsync(
+                UserId, It.IsAny<ProductDraft>(), false, It.IsAny<CancellationToken>(),
+                FavoriteCategoryKind.Water, null))
+            .ReturnsAsync((true, new FavoriteProduct { Id = 2, Name = "Морс", CategoryKind = FavoriteCategoryKind.Water }));
+
+        await h.Scenario.HandleWaterMacrosAsync(ChatId, UserId, "0.1 0 5", CancellationToken.None);
+
+        h.Favorites.Verify(f => f.AddOrUpdateAsync(
+                UserId, It.IsAny<ProductDraft>(), false, It.IsAny<CancellationToken>(), FavoriteCategoryKind.Water, null),
+            Times.Once);
+        Assert.Equal(ConversationState.Idle, h.States.Get(UserId).State);
+    }
+
+    // ------------------------------------------------------------------
+    // Продукты — подкатегории
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task ShowProductCategoriesAsync_ListsCategoriesAsButtons()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetProductCategoriesAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new ProductCategory { Id = 1, Name = "Белковые продукты", IsBuiltIn = true } });
+        h.Favorites.Setup(f => f.GetByCategoryAsync(UserId, FavoriteCategoryKind.Product, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FavoriteProduct>());
+
+        await h.Scenario.ShowProductCategoriesAsync(ChatId, UserId, editMessageId: null, manageMode: false, CancellationToken.None);
+
+        Assert.Single(h.Bot.Sent);
+        var keyboard = Assert.IsType<InlineKeyboardMarkup>(h.Bot.Sent[0].ReplyMarkup);
+        Assert.Contains(keyboard.InlineKeyboard.SelectMany(row => row), b => b.Text.Contains("Белковые продукты"));
+    }
+
+    [Fact]
+    public async Task HandleProductCategoryPickAsync_ShowsItemsInThatCategory()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetByCategoryAsync(UserId, FavoriteCategoryKind.Product, 3, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new FavoriteProduct { Id = 9, Name = "Гречка", CategoryKind = FavoriteCategoryKind.Product, ProductCategoryId = 3 } });
+        h.Favorites.Setup(f => f.GetProductCategoriesAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new ProductCategory { Id = 3, Name = "Зерновые и крахмалистые" } });
+
+        var query = BuildCallbackQuery("pcat:3");
+        await h.Scenario.HandleProductCategoryPickAsync(query, argument: "3", CancellationToken.None);
+
+        Assert.Single(h.Bot.Edited);
+        Assert.Contains("Гречка", string.Join(" ", ((InlineKeyboardMarkup)h.Bot.Edited[0].ReplyMarkup!).InlineKeyboard.SelectMany(r => r).Select(b => b.Text)));
+        Assert.Contains("Зерновые и крахмалистые", h.Bot.Edited[0].Text);
+    }
+
+    [Fact]
+    public async Task StartAddProductAsync_SetsPendingCategoryAndAwaitsName()
+    {
+        var h = CreateHarness();
+        var query = BuildCallbackQuery("pah:3");
+
+        await h.Scenario.StartAddProductAsync(query, argument: "3", CancellationToken.None);
+
+        var context = h.States.Get(UserId);
+        Assert.Equal(3, context.PendingProductCategoryId);
+        Assert.Equal(ConversationState.AwaitingFavoriteName, context.State);
+    }
+
+    [Fact]
+    public async Task StartAddProductAsync_WithZeroArgument_LeavesPendingCategoryNull()
+    {
+        var h = CreateHarness();
+        var query = BuildCallbackQuery("pah:0");
+
+        await h.Scenario.StartAddProductAsync(query, argument: "0", CancellationToken.None);
+
+        Assert.Null(h.States.Get(UserId).PendingProductCategoryId);
     }
 
     [Fact]
@@ -74,25 +199,29 @@ public class FavoritesScenarioTests
     }
 
     [Fact]
-    public async Task HandleMacrosAsync_PerHundredMode_SavesImmediatelyAsFloatingServing()
+    public async Task HandleMacrosAsync_PerHundredMode_SavesWithPendingCategory()
     {
         var h = CreateHarness();
         var context = h.States.Get(UserId);
         context.ProductName = "Творог";
         context.MacrosPerHundredGrams = true;
+        context.PendingProductCategoryId = 3;
         context.State = ConversationState.AwaitingFavoriteMacros;
 
-        h.Favorites.Setup(f => f.AddOrUpdateAsync(UserId, It.IsAny<ProductDraft>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        h.Favorites.Setup(f => f.AddOrUpdateAsync(
+                UserId, It.IsAny<ProductDraft>(), false, It.IsAny<CancellationToken>(),
+                FavoriteCategoryKind.Product, 3))
             .ReturnsAsync((true, new FavoriteProduct { Id = 1, UserId = UserId, Name = "Творог", Calories = 113, IsFixedServing = false }));
 
         await h.Scenario.HandleMacrosAsync(ChatId, UserId, "18 5 3", CancellationToken.None);
 
-        // На 100 г вводим как есть, вес спрашивается позже — при добавлении в цикл, а не сейчас.
         h.Favorites.Verify(f => f.AddOrUpdateAsync(
                 UserId,
                 It.Is<ProductDraft>(d => d.Proteins == 18 && d.Fats == 5 && d.Carbs == 3),
                 /* isFixedServing */ false,
-                It.IsAny<CancellationToken>()),
+                It.IsAny<CancellationToken>(),
+                FavoriteCategoryKind.Product,
+                3),
             Times.Once);
         Assert.Equal(ConversationState.Idle, h.States.Get(UserId).State);
         Assert.Single(h.Bot.Sent);
@@ -120,7 +249,9 @@ public class FavoritesScenarioTests
         context.Apply(ProductDraft.FromMacros("Творог", 18, 5, 3));
         context.State = ConversationState.AwaitingFavoriteServingSize;
 
-        h.Favorites.Setup(f => f.AddOrUpdateAsync(UserId, It.IsAny<ProductDraft>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        h.Favorites.Setup(f => f.AddOrUpdateAsync(
+                UserId, It.IsAny<ProductDraft>(), It.IsAny<bool>(), It.IsAny<CancellationToken>(),
+                It.IsAny<FavoriteCategoryKind>(), It.IsAny<int?>()))
             .ReturnsAsync((true, new FavoriteProduct { Id = 1, UserId = UserId, Name = "Творог", Calories = 113, ServingSize = "200 г", IsFixedServing = true }));
 
         await h.Scenario.HandleServingSizeAsync(ChatId, UserId, "200 г", CancellationToken.None);
@@ -129,7 +260,9 @@ public class FavoritesScenarioTests
                 UserId,
                 It.Is<ProductDraft>(d => d.ServingSize == "200 г"),
                 /* isFixedServing */ true,
-                It.IsAny<CancellationToken>()),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<FavoriteCategoryKind>(),
+                It.IsAny<int?>()),
             Times.Once);
         Assert.Equal(ConversationState.Idle, h.States.Get(UserId).State);
         Assert.Single(h.Bot.Sent);
@@ -143,7 +276,9 @@ public class FavoritesScenarioTests
         context.Apply(ProductDraft.FromMacros("Творог", 18, 5, 3));
         context.ActiveInlineMessageId = 77;
 
-        h.Favorites.Setup(f => f.AddOrUpdateAsync(UserId, It.IsAny<ProductDraft>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        h.Favorites.Setup(f => f.AddOrUpdateAsync(
+                UserId, It.IsAny<ProductDraft>(), It.IsAny<bool>(), It.IsAny<CancellationToken>(),
+                It.IsAny<FavoriteCategoryKind>(), It.IsAny<int?>()))
             .ReturnsAsync((true, new FavoriteProduct { Id = 1, UserId = UserId, Name = "Творог", Calories = 113, IsFixedServing = true }));
 
         var query = BuildCallbackQuery();
@@ -154,36 +289,90 @@ public class FavoritesScenarioTests
                 UserId,
                 It.Is<ProductDraft>(d => d.ServingSize == null),
                 /* isFixedServing */ true,
-                It.IsAny<CancellationToken>()),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<FavoriteCategoryKind>(),
+                It.IsAny<int?>()),
             Times.Once);
         Assert.Single(h.Bot.Edited);
     }
 
     [Fact]
-    public async Task ShowListAsync_WhenEmpty_SendsEmptyFavoritesMessage()
+    public async Task StartCreateCategoryAsync_AwaitsCategoryName()
     {
         var h = CreateHarness();
-        h.Favorites.Setup(f => f.GetAllAsync(UserId, It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<FavoriteProduct>());
+        var query = BuildCallbackQuery("pcn");
 
-        await h.Scenario.ShowListAsync(ChatId, UserId, page: 0, editMessageId: null, CancellationToken.None);
+        await h.Scenario.StartCreateCategoryAsync(query, CancellationToken.None);
 
-        Assert.Single(h.Bot.Sent);
-        Assert.Contains("пусто", h.Bot.Sent[0].Text);
+        var context = h.States.Get(UserId);
+        Assert.Equal(ConversationState.AwaitingProductCategoryName, context.State);
+        Assert.Null(context.EditingProductCategoryId);
     }
 
     [Fact]
-    public async Task ShowListAsync_WithProducts_ListsThemAsClickableButtons()
+    public async Task StartRenameCategoryAsync_SetsEditingIdAndAwaitsName()
     {
         var h = CreateHarness();
-        h.Favorites.Setup(f => f.GetAllAsync(UserId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<FavoriteProduct> { new() { Id = 1, Name = "Рис", Calories = 300 } });
+        var query = BuildCallbackQuery("pcr:3");
 
-        await h.Scenario.ShowListAsync(ChatId, UserId, page: 0, editMessageId: null, CancellationToken.None);
+        await h.Scenario.StartRenameCategoryAsync(query, argument: "3", CancellationToken.None);
 
-        Assert.Single(h.Bot.Sent);
-        var keyboard = Assert.IsType<InlineKeyboardMarkup>(h.Bot.Sent[0].ReplyMarkup);
-        Assert.Contains(keyboard.InlineKeyboard.SelectMany(row => row), button => button.Text.Contains("Рис"));
+        var context = h.States.Get(UserId);
+        Assert.Equal(3, context.EditingProductCategoryId);
+        Assert.Equal(ConversationState.AwaitingProductCategoryName, context.State);
     }
+
+    [Fact]
+    public async Task HandleCategoryNameAsync_WithoutEditingId_CreatesNewCategory()
+    {
+        var h = CreateHarness();
+        h.States.Get(UserId).State = ConversationState.AwaitingProductCategoryName;
+        h.Favorites.Setup(f => f.CreateProductCategoryAsync(UserId, "Напитки", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProductCategory { Id = 10, Name = "Напитки" });
+
+        await h.Scenario.HandleCategoryNameAsync(ChatId, UserId, "Напитки", CancellationToken.None);
+
+        h.Favorites.Verify(f => f.CreateProductCategoryAsync(UserId, "Напитки", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains("Напитки", h.Bot.Sent[0].Text);
+    }
+
+    [Fact]
+    public async Task HandleCategoryNameAsync_WithEditingId_RenamesCategory()
+    {
+        var h = CreateHarness();
+        var context = h.States.Get(UserId);
+        context.State = ConversationState.AwaitingProductCategoryName;
+        context.EditingProductCategoryId = 3;
+
+        h.Favorites.Setup(f => f.RenameProductCategoryAsync(UserId, 3, "Крупы", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProductCategory { Id = 3, Name = "Крупы" });
+
+        await h.Scenario.HandleCategoryNameAsync(ChatId, UserId, "Крупы", CancellationToken.None);
+
+        h.Favorites.Verify(f => f.RenameProductCategoryAsync(UserId, 3, "Крупы", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains("Крупы", h.Bot.Sent[0].Text);
+    }
+
+    [Fact]
+    public async Task HandleCategoryDeleteConfirmAsync_DeletesAndReturnsToManageList()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetProductCategoriesAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new ProductCategory { Id = 3, Name = "Жиры" } });
+        h.Favorites.Setup(f => f.DeleteProductCategoryAsync(UserId, 3, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        h.Favorites.Setup(f => f.GetByCategoryAsync(UserId, FavoriteCategoryKind.Product, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FavoriteProduct>());
+
+        var query = BuildCallbackQuery("pcdy:3");
+        await h.Scenario.HandleCategoryDeleteConfirmAsync(query, argument: "3", CancellationToken.None);
+
+        h.Favorites.Verify(f => f.DeleteProductCategoryAsync(UserId, 3, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Single(h.Bot.Edited);
+    }
+
+    // ------------------------------------------------------------------
+    // Общие: карточка, редактирование, удаление, перенос
+    // ------------------------------------------------------------------
 
     [Fact]
     public async Task ShowDetailsAsync_WithExistingProduct_ShowsCardAndActions()
@@ -201,11 +390,11 @@ public class FavoritesScenarioTests
     }
 
     [Fact]
-    public async Task StartEditMacrosAsync_PrefillsNameAndAsksServingMode()
+    public async Task StartEditMacrosAsync_ForProduct_PrefillsNameAndAsksServingMode()
     {
         var h = CreateHarness();
         h.Favorites.Setup(f => f.GetAsync(UserId, 5, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new FavoriteProduct { Id = 5, Name = "Рис", Calories = 300 });
+            .ReturnsAsync(new FavoriteProduct { Id = 5, Name = "Рис", Calories = 300, CategoryKind = FavoriteCategoryKind.Product });
 
         var query = BuildCallbackQuery(data: "fem:5");
         await h.Scenario.StartEditMacrosAsync(query, argument: "5", CancellationToken.None);
@@ -214,6 +403,22 @@ public class FavoritesScenarioTests
         Assert.Equal("Рис", context.ProductName);
         Assert.Equal(ConversationState.AwaitingFavoriteMacrosMode, context.State);
         Assert.Single(h.Bot.Edited);
+    }
+
+    [Fact]
+    public async Task StartEditMacrosAsync_ForWater_SkipsServingModeAndAsksMacrosPerLiter()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetAsync(UserId, 5, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FavoriteProduct { Id = 5, Name = "Вода", Calories = 0, CategoryKind = FavoriteCategoryKind.Water });
+
+        var query = BuildCallbackQuery(data: "fem:5");
+        await h.Scenario.StartEditMacrosAsync(query, argument: "5", CancellationToken.None);
+
+        var context = h.States.Get(UserId);
+        Assert.Equal("Вода", context.ProductName);
+        Assert.Equal(ConversationState.AwaitingWaterMacros, context.State);
+        Assert.Contains("литр", h.Bot.Edited[0].Text);
     }
 
     [Fact]
@@ -230,6 +435,40 @@ public class FavoritesScenarioTests
 
         h.Favorites.Verify(f => f.SetFixedServingAsync(UserId, 5, false, It.IsAny<CancellationToken>()), Times.Once);
         Assert.Single(h.Bot.Edited);
+    }
+
+    [Fact]
+    public async Task StartMoveCategoryAsync_ShowsCategoryChoice()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetAsync(UserId, 5, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FavoriteProduct { Id = 5, Name = "Рис", CategoryKind = FavoriteCategoryKind.Product });
+        h.Favorites.Setup(f => f.GetProductCategoriesAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new ProductCategory { Id = 3, Name = "Зерновые и крахмалистые" } });
+
+        var query = BuildCallbackQuery("fmc:5");
+        await h.Scenario.StartMoveCategoryAsync(query, argument: "5", CancellationToken.None);
+
+        Assert.Single(h.Bot.Edited);
+        var keyboard = Assert.IsType<InlineKeyboardMarkup>(h.Bot.Edited[0].ReplyMarkup);
+        Assert.Contains(keyboard.InlineKeyboard.SelectMany(row => row), b => b.Text.Contains("Зерновые"));
+    }
+
+    [Fact]
+    public async Task HandleMoveCategoryConfirmAsync_MovesAndShowsUpdatedCard()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.SetProductCategoryAsync(UserId, 5, 3, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FavoriteProduct { Id = 5, Name = "Рис", CategoryKind = FavoriteCategoryKind.Product, ProductCategoryId = 3 });
+        h.Favorites.Setup(f => f.GetProductCategoriesAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new ProductCategory { Id = 3, Name = "Зерновые и крахмалистые" } });
+
+        var query = BuildCallbackQuery("fmcc:5:3");
+        await h.Scenario.HandleMoveCategoryConfirmAsync(query, argument: "5:3", CancellationToken.None);
+
+        h.Favorites.Verify(f => f.SetProductCategoryAsync(UserId, 5, 3, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Single(h.Bot.Edited);
+        Assert.Contains("Зерновые и крахмалистые", h.Bot.Edited[0].Text);
     }
 
     [Fact]
@@ -278,12 +517,4 @@ public class FavoritesScenarioTests
 
         Assert.Single(h.Bot.Edited);
     }
-
-    private static CallbackQuery BuildCallbackQuery(string data = "skp") => new()
-    {
-        Id = "cb-1",
-        From = new User { Id = UserId, FirstName = "Test" },
-        Message = new Message { Id = 55, Chat = new Chat { Id = ChatId } },
-        Data = data
-    };
 }

@@ -26,7 +26,7 @@ public static class Texts
         "Что добавляем?\n\n💝 <b>Из любимых</b> — выбрать из сохранённых продуктов\n🔍 <b>Новый продукт</b> — ввести название и БЖУ";
 
     public const string FavoritesMenuText =
-        "⭐ <b>Любимые продукты</b>\n\nЗдесь я храню продукты, которые вы едите чаще всего — их можно добавлять в дневник одним нажатием.";
+        "⭐ <b>Избранное</b>\n\nЗдесь я храню продукты, которые вы едите чаще всего — их можно добавлять в дневник одним нажатием.";
 
     public static readonly string AskProductName =
         $"Как называется продукт?\n\nОтправьте название сообщением (от {InputParser.MinNameLength} до {InputParser.MaxNameLength} символов).";
@@ -43,23 +43,32 @@ public static class Texts
         "📏 <b>На 100 г</b> (например, рис) — порция каждый раз разная, при добавлении в дневник я буду " +
         "спрашивать съеденный вес и пересчитывать КБЖУ на него.";
 
+    /// <summary>Общая подсказка по формату — строго три числа через пробел, без минуса, максимум один знак после запятой.</summary>
+    public const string MacrosFormatHint =
+        "три числа через пробел, без знака «минус», не больше одного знака после запятой.";
+
     public const string AskMacros =
-        "Теперь пришлите БЖУ <b>на порцию</b> в граммах — три числа в порядке <b>белки жиры углеводы</b>.\n\n" +
-        "Например: <code>12 5 30</code>\n\nКалории я посчитаю сам по формуле Б×4 + Ж×9 + У×4.";
+        "Теперь пришлите БЖУ <b>на порцию</b> в граммах — три числа в порядке <b>белки жиры углеводы</b>, " +
+        MacrosFormatHint + "\n\n" +
+        "Например: <code>12 5 1</code>\n\nКалории я посчитаю сам по формуле Б×4 + Ж×9 + У×4.";
 
     public const string AskMacrosPerHundred =
-        "Пришлите БЖУ <b>на 100 г продукта</b> — три числа в порядке <b>белки жиры углеводы</b>.\n\n" +
-        "Например: <code>12 5 30</code>";
+        "Пришлите БЖУ <b>на 100 г продукта</b> — три числа в порядке <b>белки жиры углеводы</b>, " +
+        MacrosFormatHint + "\n\n" +
+        "Например: <code>12 5 1</code>";
 
     public const string AskServingGrams =
         "Сколько грамм в порции? Отправьте число, например <code>150</code> — пересчитаю БЖУ и калории на этот вес.";
+
+    public const string AskServingLiters =
+        "Сколько литров выпито? Отправьте число, например <code>0.5</code> — пересчитаю БЖУ и калории на этот объём.";
 
     public const string AskServingSize =
         "Опишите порцию — например <code>200 г</code> или <code>1 стакан</code>.\n\n" +
         "Если не нужно, нажмите «⏭ Пропустить».";
 
     public const string EmptyFavorites =
-        "⭐ Избранное пока пусто.\n\nДобавьте продукты через <b>⭐ Любимые продукты → ➕ Добавить в избранное</b> — потом их можно будет записывать в один тап.";
+        "⭐ Избранное пока пусто.\n\nДобавьте продукты через <b>⭐ Избранное → ➕ Добавить в избранное</b> — потом их можно будет записывать в один тап.";
 
     /// <summary>
     /// Приветствие при /start. Если лимит ещё не меняли, честно пишу, что он дефолтный.
@@ -107,7 +116,7 @@ public static class Texts
     /// </summary>
     public static string Progress(DailyProgress progress, IReadOnlyList<FoodLogEntry> entries, TimeSpan offset)
     {
-        var cycleStart = new DateTimeOffset(DateTime.SpecifyKind(progress.CycleStartedAt, DateTimeKind.Utc)).ToOffset(offset);
+        var cycleStart = ToLocal(progress.CycleStartedAt, offset);
 
         var builder = new StringBuilder();
         builder.AppendLine("📊 <b>Мой прогресс</b>");
@@ -163,15 +172,21 @@ public static class Texts
     {
         builder.AppendLine($"Калорийность съеденного: <b>{progress.ConsumedCalories} ккал</b> <i>(справочно — вы отслеживаете БЖУ)</i>.");
         builder.AppendLine();
-        AppendMacroTargetLine(builder, "🥩 Белки", progress.Proteins, progress.ProteinsLimit, progress.ProteinsRemaining, progress.IsProteinsExceeded, progress.ProteinsExceededBy);
-        AppendMacroTargetLine(builder, "🧈 Жиры", progress.Fats, progress.FatsLimit, progress.FatsRemaining, progress.IsFatsExceeded, progress.FatsExceededBy);
-        AppendMacroTargetLine(builder, "🍞 Углеводы", progress.Carbs, progress.CarbsLimit, progress.CarbsRemaining, progress.IsCarbsExceeded, progress.CarbsExceededBy);
+        AppendMacroBreakdown(builder, progress);
 
         if (progress.IsProteinsExceeded || progress.IsFatsExceeded || progress.IsCarbsExceeded)
         {
             builder.AppendLine();
             builder.Append("⚠️ Не забудьте: счётчик не обнулится сам — нажмите «🆕 Новый день», когда будете готовы.");
         }
+    }
+
+    /// <summary>Три строки по Б/Ж/У с остатком/перебором — общий блок для прогресса и подтверждения записи.</summary>
+    private static void AppendMacroBreakdown(StringBuilder builder, DailyProgress progress)
+    {
+        AppendMacroTargetLine(builder, "🥩 Белки", progress.Proteins, progress.ProteinsLimit, progress.ProteinsRemaining, progress.IsProteinsExceeded, progress.ProteinsExceededBy);
+        AppendMacroTargetLine(builder, "🧈 Жиры", progress.Fats, progress.FatsLimit, progress.FatsRemaining, progress.IsFatsExceeded, progress.FatsExceededBy);
+        AppendMacroTargetLine(builder, "🍞 Углеводы", progress.Carbs, progress.CarbsLimit, progress.CarbsRemaining, progress.IsCarbsExceeded, progress.CarbsExceededBy);
     }
 
     private static void AppendMacroTargetLine(
@@ -229,7 +244,7 @@ public static class Texts
 
             foreach (var entry in group.OrderBy(e => e.LoggedAt))
             {
-                var localTime = new DateTimeOffset(DateTime.SpecifyKind(entry.LoggedAt, DateTimeKind.Utc)).ToOffset(offset);
+                var localTime = ToLocal(entry.LoggedAt, offset);
                 var serving = string.IsNullOrWhiteSpace(entry.ServingSize) ? string.Empty : $", {Escape(entry.ServingSize!)}";
                 var favoriteMark = entry.IsFavorite ? " ⭐" : string.Empty;
 
@@ -255,9 +270,7 @@ public static class Texts
 
         if (progress.TrackingMode == CalorieTrackingMode.Macros)
         {
-            AppendMacroTargetLine(builder, "🥩 Белки", progress.Proteins, progress.ProteinsLimit, progress.ProteinsRemaining, progress.IsProteinsExceeded, progress.ProteinsExceededBy);
-            AppendMacroTargetLine(builder, "🧈 Жиры", progress.Fats, progress.FatsLimit, progress.FatsRemaining, progress.IsFatsExceeded, progress.FatsExceededBy);
-            AppendMacroTargetLine(builder, "🍞 Углеводы", progress.Carbs, progress.CarbsLimit, progress.CarbsRemaining, progress.IsCarbsExceeded, progress.CarbsExceededBy);
+            AppendMacroBreakdown(builder, progress);
             return builder.ToString().TrimEnd();
         }
 
@@ -279,7 +292,7 @@ public static class Texts
     /// <summary>Спрашиваю подтверждение перед закрытием текущего цикла.</summary>
     public static string AskNewDayConfirm(DailyProgress progress, TimeSpan offset)
     {
-        var cycleStart = new DateTimeOffset(DateTime.SpecifyKind(progress.CycleStartedAt, DateTimeKind.Utc)).ToOffset(offset);
+        var cycleStart = ToLocal(progress.CycleStartedAt, offset);
 
         var builder = new StringBuilder();
         builder.AppendLine("🆕 <b>Начать новый день?</b>");
@@ -287,7 +300,7 @@ public static class Texts
         builder.AppendLine($"Текущий цикл идёт с {cycleStart:dd.MM HH:mm} ({Duration(progress.CycleElapsed)}).");
         builder.AppendLine($"Съедено: <b>{progress.ConsumedCalories}</b> из <b>{progress.CalorieLimit}</b> ккал ({progress.PercentUsed}%).");
         builder.AppendLine();
-        builder.Append("Он сохранится в «📅 Прошлые циклы», а счётчик обнулится и пойдёт заново.");
+        builder.Append("Он сохранится в «📅 История», а счётчик обнулится и пойдёт заново.");
 
         return builder.ToString();
     }
@@ -301,14 +314,14 @@ public static class Texts
     public static string CycleHistoryPage(IReadOnlyList<CalorieCycle> cycles, int page, int pageSize, int totalCount, TimeSpan offset)
     {
         var builder = new StringBuilder();
-        builder.AppendLine($"📅 <b>Прошлые циклы</b> ({totalCount})");
+        builder.AppendLine($"📅 <b>История</b> ({totalCount})");
         builder.AppendLine();
 
         var index = page * pageSize + 1;
         foreach (var cycle in cycles)
         {
-            var start = new DateTimeOffset(DateTime.SpecifyKind(cycle.StartedAt, DateTimeKind.Utc)).ToOffset(offset);
-            var end = new DateTimeOffset(DateTime.SpecifyKind(cycle.EndedAt, DateTimeKind.Utc)).ToOffset(offset);
+            var start = ToLocal(cycle.StartedAt, offset);
+            var end = ToLocal(cycle.EndedAt, offset);
             var percent = cycle.CalorieLimit <= 0 ? 0 : (int)Math.Round(cycle.ConsumedCalories * 100m / cycle.CalorieLimit, MidpointRounding.AwayFromZero);
             var mark = cycle.ConsumedCalories > cycle.CalorieLimit ? " ⚠️" : string.Empty;
 
@@ -322,8 +335,145 @@ public static class Texts
         return builder.ToString().TrimEnd();
     }
 
+    /// <summary>Ниже этой разницы отклонение считаю шумом округления, а не поводом для рекомендации.</summary>
+    private const int CalorieRecommendationThreshold = 50;
+
+    private const decimal MacroRecommendationThresholdGrams = 5m;
+
+    /// <summary>Отчёт за неделю/месяц — сводка и текстовая рекомендация. Лимит пользователя не меняет.</summary>
+    public static string PeriodReport(PeriodReport report)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"📈 <b>Отчёт за {report.PeriodDays} дн.</b>");
+        builder.AppendLine();
+
+        if (report.DaysWithData == 0)
+        {
+            builder.Append("За этот период записей не было — отчёт появится, когда наберётся история.");
+            return builder.ToString();
+        }
+
+        builder.AppendLine($"Дней с записями: <b>{report.DaysWithData}</b> из {report.PeriodDays}");
+        builder.AppendLine();
+
+        if (report.TrackingMode == CalorieTrackingMode.Macros)
+        {
+            builder.AppendLine($"В среднем за день: Б {Num(report.AverageProteins)} · Ж {Num(report.AverageFats)} · У {Num(report.AverageCarbs)} г");
+            builder.AppendLine(
+                $"Ориентиры: Б {Num(report.ProteinsLimit ?? 0m)} · Ж {Num(report.FatsLimit ?? 0m)} · У {Num(report.CarbsLimit ?? 0m)} г");
+        }
+        else
+        {
+            builder.AppendLine($"Среднее потребление: <b>{report.AverageCalories}</b> из <b>{report.CalorieLimit}</b> ккал/день");
+            builder.AppendLine($"Дней с перебором: {report.DaysOverCalorieLimit} · дней с недобором: {report.DaysUnderCalorieLimit}");
+            builder.AppendLine($"В среднем за день: Б {Num(report.AverageProteins)} · Ж {Num(report.AverageFats)} · У {Num(report.AverageCarbs)} г");
+        }
+
+        var recommendation = BuildPeriodRecommendation(report);
+        if (recommendation is not null)
+        {
+            builder.AppendLine();
+            builder.Append(recommendation);
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// Рекомендация «выровнять» по последнему завершённому дню — распределяю отклонение на ближайшие
+    /// 1-2 дня. Только текст: сам дневной лимит пользователя эта рекомендация не меняет.
+    /// </summary>
+    private static string? BuildPeriodRecommendation(PeriodReport report)
+    {
+        if (report.LastDayWithData is null)
+        {
+            return null;
+        }
+
+        if (report.TrackingMode == CalorieTrackingMode.Macros)
+        {
+            var lines = new List<string>();
+            AppendMacroRecommendation(lines, "белка", report.LastDayProteins, report.ProteinsLimit);
+            AppendMacroRecommendation(lines, "жира", report.LastDayFats, report.FatsLimit);
+            AppendMacroRecommendation(lines, "углеводов", report.LastDayCarbs, report.CarbsLimit);
+
+            return lines.Count == 0 ? null : string.Join("\n", lines);
+        }
+
+        var diff = report.CalorieLimit - report.LastDayCalories;
+        if (Math.Abs(diff) < CalorieRecommendationThreshold)
+        {
+            return null;
+        }
+
+        var perDay = diff / 2;
+        var adjusted = report.CalorieLimit + perDay;
+        var direction = diff > 0 ? "не добрали" : "перебрали";
+
+        return $"Вчера {direction} по калориям на {Math.Abs(diff)} ккал → на ближайшие 1-2 дня можно " +
+               $"ориентироваться на ~{adjusted} ккал вместо {report.CalorieLimit} (рекомендация, лимит не меняю).";
+    }
+
+    private static void AppendMacroRecommendation(List<string> lines, string label, decimal consumed, decimal? limit)
+    {
+        if (limit is null or 0m)
+        {
+            return;
+        }
+
+        var diff = limit.Value - consumed;
+        if (Math.Abs(diff) < MacroRecommendationThresholdGrams)
+        {
+            return;
+        }
+
+        var perDay = Math.Round(diff / 2m, 1);
+        var adjusted = Math.Round(limit.Value + perDay, 1);
+        var direction = diff > 0 ? "не добрали" : "перебрали";
+
+        lines.Add(
+            $"Вчера {direction} {label} на {Num(Math.Abs(diff))} г → на ближайшие 1-2 дня ориентир " +
+            $"~{Num(adjusted)} г вместо {Num(limit.Value)} (лимит не меняю).");
+    }
+
     public const string EmptyCycleHistory =
         "📅 Прошлых циклов пока нет.\n\nОни появятся здесь после того, как вы хотя бы раз нажмёте «🆕 Новый день».";
+
+    /// <summary>Карточка одного прошлого цикла — открывается по тапу из «Истории», записи представлены кнопками ниже.</summary>
+    public static string CycleDetailsCard(CalorieCycle cycle, IReadOnlyList<FoodLogEntry> entries, TimeSpan offset)
+    {
+        var start = ToLocal(cycle.StartedAt, offset);
+        var end = ToLocal(cycle.EndedAt, offset);
+        var percent = cycle.CalorieLimit <= 0 ? 0 : (int)Math.Round(cycle.ConsumedCalories * 100m / cycle.CalorieLimit, MidpointRounding.AwayFromZero);
+        var mark = cycle.ConsumedCalories > cycle.CalorieLimit ? " ⚠️" : string.Empty;
+
+        var builder = new StringBuilder();
+        builder.AppendLine($"📅 <b>Цикл {start:dd.MM HH:mm} → {end:dd.MM HH:mm}</b> ({Duration(end - start)})");
+        builder.AppendLine(
+            $"🔥 {cycle.ConsumedCalories} из {cycle.CalorieLimit} ккал ({percent}%){mark} · " +
+            $"Б {Num(cycle.Proteins)} · Ж {Num(cycle.Fats)} · У {Num(cycle.Carbs)} · записей: {cycle.EntriesCount}");
+        builder.AppendLine();
+
+        builder.Append(entries.Count == 0
+            ? "Записей нет — можно добавить кнопкой ниже."
+            : "Нажмите на запись ниже, чтобы удалить её, либо добавьте новую.");
+
+        return builder.ToString();
+    }
+
+    /// <summary>Подпись кнопки-записи в карточке цикла — тап по ней запрашивает удаление.</summary>
+    public static string EntryButtonLabel(FoodLogEntry entry, TimeSpan offset)
+    {
+        var localTime = ToLocal(entry.LoggedAt, offset);
+        var name = entry.ProductName.Length > 20 ? entry.ProductName[..19] + "…" : entry.ProductName;
+        return $"🗑 {localTime:dd.MM HH:mm} {name} — {entry.Calories} ккал";
+    }
+
+    /// <summary>Запрос подтверждения удаления записи из прошлого цикла.</summary>
+    public static string ConfirmDeleteCycleEntry(FoodLogEntry entry, TimeSpan offset) =>
+        $"🗑 Удалить эту запись из цикла?\n\n" +
+        $"{ToLocal(entry.LoggedAt, offset):dd.MM HH:mm} — <b>{Escape(entry.ProductName)}</b>\n" +
+        $"{MealTypeName(entry.MealType)} · {entry.Calories} ккал";
 
     /// <summary>Экран «Текущий лимит».</summary>
     public static string CurrentLimit(AppUser user, DailyProgress progress, TimeSpan offset)
@@ -354,7 +504,7 @@ public static class Texts
         builder.AppendLine();
         builder.AppendLine(user.GoalSetAt is null
             ? "Лимит стоит по умолчанию — вы его ещё не меняли."
-            : $"Установлен: {new DateTimeOffset(DateTime.SpecifyKind(user.GoalSetAt.Value, DateTimeKind.Utc)).ToOffset(offset):dd.MM.yyyy HH:mm} (UTC+3)");
+            : $"Установлен: {ToLocal(user.GoalSetAt.Value, offset):dd.MM.yyyy HH:mm} (UTC+3)");
 
         builder.AppendLine("<i>Лимит действует постоянно, пока вы сами его не замените.</i>");
         builder.AppendLine();
@@ -380,7 +530,8 @@ public static class Texts
 
     /// <summary>Запрос новых дневных лимитов БЖУ.</summary>
     public const string AskMacroLimits =
-        "Пришлите дневные лимиты БЖУ в граммах — три числа в порядке <b>белки жиры углеводы</b>.\n\n" +
+        "Пришлите дневные лимиты БЖУ в граммах — три числа в порядке <b>белки жиры углеводы</b>, " +
+        MacrosFormatHint + "\n\n" +
         "Например: <code>150 60 250</code>";
 
     /// <summary>Подтверждение смены лимита калорий.</summary>
@@ -455,6 +606,13 @@ public static class Texts
     public static string ChooseMealType(ProductDraft draft) =>
         $"{ProductCard(draft)}\n\n🍽 <b>Когда вы это съели?</b>";
 
+    /// <summary>Предупреждение: продукт с таким названием уже записан в этом цикле.</summary>
+    public static string AskDuplicateMealConfirm(FoodLogEntry existing, ProductDraft draft) =>
+        $"⚠️ Вы уже записывали <b>{Escape(existing.ProductName)}</b> в этом цикле " +
+        $"({MealTypeName(existing.MealType)}, {existing.Calories} ккал).\n\n" +
+        $"{ProductCard(draft)}\n\n" +
+        "Заменить ту запись новой или добавить как отдельный приём пищи?";
+
     /// <summary>Карточка продукта плюс предложение сохранить его в избранное.</summary>
     public static string OfferToSaveFavorite(ProductDraft draft) =>
         $"{ProductCard(draft)}\n\n⭐ Сохранить продукт в избранное, чтобы добавлять его в один тап?";
@@ -486,6 +644,103 @@ public static class Texts
     public static string MyProductsHeader(int totalFavorites) =>
         $"📝 <b>Мои продукты</b> ({totalFavorites})\n\nВыберите продукт, чтобы посмотреть или изменить его.";
 
+    /// <summary>БЖУ элемента «Воды» — всегда на 1 литр, отдельная подсказка вместо общей «на 100 г / на порцию».</summary>
+    public const string AskMacrosPerLiter =
+        "Пришлите БЖУ <b>на 1 литр</b> — три числа в порядке <b>белки жиры углеводы</b>, " +
+        MacrosFormatHint + "\n\nДля обычной воды подойдёт <code>0 0 0</code>… впрочем, значения БЖУ должны быть больше нуля — " +
+        "если жидкость калорийная (морс, сок), укажите её реальное БЖУ. Например: <code>0.1 0 5</code>";
+
+    /// <summary>Заголовок списка «Вода».</summary>
+    public static string WaterListHeader(int totalItems) =>
+        $"💧 <b>Вода</b> ({totalItems})\n\nВыберите жидкость, чтобы посмотреть или изменить её, либо добавьте новую.";
+
+    /// <summary>Спрашиваю название новой жидкости для «Воды».</summary>
+    public const string AskWaterName =
+        "Как называется жидкость? Например «Вода» или «Морс».\n\nОтправьте название сообщением.";
+
+    /// <summary>Заголовок списка «Готовые блюда».</summary>
+    public static string DishListHeader(int totalDishes) =>
+        $"🍲 <b>Готовые блюда</b> ({totalDishes})\n\nВыберите блюдо, чтобы посмотреть состав, либо создайте новое.";
+
+    /// <summary>Спрашиваю название нового блюда.</summary>
+    public const string AskDishName =
+        "Как называется блюдо? Например «Овсянка с бананом».\n\nОтправьте название сообщением.";
+
+    /// <summary>Карточка блюда: КБЖУ автосуммой по ингредиентам, список ингредиентов — кнопками ниже.</summary>
+    public static string DishCard(FavoriteProduct dish)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"🍲 <b>{Escape(dish.Name)}</b>");
+        builder.AppendLine();
+        builder.AppendLine($"🔥 {dish.Calories} ккал · Б {Num(dish.Proteins)} · Ж {Num(dish.Fats)} · У {Num(dish.Carbs)} г");
+        builder.Append("<i>КБЖУ считаются автосуммой ингредиентов — правьте состав, а не эти числа напрямую.</i>");
+
+        return builder.ToString();
+    }
+
+    /// <summary>Спрашиваю название ингредиента, добавляемого в блюдо.</summary>
+    public const string AskIngredientName =
+        "Название ингредиента? Отправьте сообщением.";
+
+    /// <summary>Подпись кнопки ингредиента в карточке блюда — тап по ней запрашивает удаление.</summary>
+    public static string IngredientButtonLabel(DishIngredient ingredient)
+    {
+        var name = ingredient.Name.Length > 24 ? ingredient.Name[..23] + "…" : ingredient.Name;
+        return $"🗑 {name} — {ingredient.Calories} ккал";
+    }
+
+    /// <summary>Запрос подтверждения удаления ингредиента.</summary>
+    public static string ConfirmDeleteIngredient(DishIngredient ingredient) =>
+        $"🗑 Убрать ингредиент из блюда?\n\n<b>{Escape(ingredient.Name)}</b> — {ingredient.Calories} ккал " +
+        $"(Б {Num(ingredient.Proteins)} · Ж {Num(ingredient.Fats)} · У {Num(ingredient.Carbs)} г)";
+
+    /// <summary>Заголовок экрана подкатегорий «Продуктов».</summary>
+    public static string ProductCategoriesHeader(bool manageMode) => manageMode
+        ? "✏️ <b>Управление подкатегориями</b>\n\nВыберите подкатегорию, чтобы переименовать или удалить."
+        : "🥘 <b>Продукты</b>\n\nВыберите подкатегорию.";
+
+    /// <summary>Заголовок списка продуктов внутри одной подкатегории.</summary>
+    public static string ProductsInCategoryHeader(string categoryName, int totalItems) =>
+        $"🥘 <b>{Escape(categoryName)}</b> ({totalItems})\n\nВыберите продукт, чтобы посмотреть или изменить его.";
+
+    /// <summary>Спрашиваю название новой подкатегории.</summary>
+    public const string AskNewCategoryName =
+        "Название новой подкатегории? Отправьте сообщением.";
+
+    /// <summary>Спрашиваю новое название подкатегории при переименовании.</summary>
+    public const string AskCategoryRename =
+        "Новое название подкатегории? Отправьте сообщением.";
+
+    /// <summary>Итог создания подкатегории.</summary>
+    public static string CategoryCreated(string name) =>
+        $"✅ Добавил подкатегорию «<b>{Escape(name)}</b>».";
+
+    /// <summary>Итог переименования подкатегории.</summary>
+    public static string CategoryRenamed(string name) =>
+        $"✅ Подкатегория теперь называется «<b>{Escape(name)}</b>».";
+
+    /// <summary>Карточка подкатегории в режиме управления.</summary>
+    public static string CategoryManageCard(ProductCategory category) =>
+        $"<b>{Escape(category.Name)}</b>{(category.IsBuiltIn ? " <i>(базовая)</i>" : string.Empty)}";
+
+    /// <summary>Запрос подтверждения удаления подкатегории.</summary>
+    public static string ConfirmDeleteCategory(ProductCategory category) =>
+        $"🗑 Удалить подкатегорию «<b>{Escape(category.Name)}</b>»?\n\n" +
+        "Продукты внутри неё не удалятся — просто окажутся «без подкатегории».";
+
+    /// <summary>Итог удаления подкатегории.</summary>
+    public static string CategoryDeleted(string name) =>
+        $"🗑 Удалил подкатегорию «<b>{Escape(name)}</b>».";
+
+    /// <summary>Спрашиваю, в какую подкатегорию перенести продукт.</summary>
+    public static string AskMoveCategory(FavoriteProduct product) =>
+        $"📂 В какую подкатегорию перенести «<b>{Escape(product.Name)}</b>»?";
+
+    /// <summary>Итог переноса продукта в другую подкатегорию.</summary>
+    public static string FavoriteMoved(FavoriteProduct product, string? newCategoryName) =>
+        $"📂 «<b>{Escape(product.Name)}</b>» теперь в " +
+        (newCategoryName is null ? "«📦 Без категории»." : $"«<b>{Escape(newCategoryName)}</b>».");
+
     /// <summary>Карточка продукта с деталями и типом порции — экран редактирования.</summary>
     public static string FavoriteDetailsCard(FavoriteProduct product)
     {
@@ -498,6 +753,11 @@ public static class Texts
             var serving = string.IsNullOrWhiteSpace(product.ServingSize) ? string.Empty : $" ({Escape(product.ServingSize!)})";
             builder.AppendLine($"🍽 Фиксированная порция{serving}");
             builder.AppendLine($"🔥 {product.Calories} ккал · Б {Num(product.Proteins)} · Ж {Num(product.Fats)} · У {Num(product.Carbs)} г");
+        }
+        else if (product.CategoryKind == FavoriteCategoryKind.Water)
+        {
+            builder.AppendLine("📏 Порция на 1 литр — объём спрашивается при добавлении в дневник");
+            builder.AppendLine($"🔥 {product.Calories} ккал · Б {Num(product.Proteins)} · Ж {Num(product.Fats)} · У {Num(product.Carbs)} г — <i>на 1 л</i>");
         }
         else
         {
@@ -552,6 +812,10 @@ public static class Texts
         var bar = new string('▰', filled) + new string('▱', cells - filled);
         return percent > 100 ? $"{bar} {percent}% ⚠️" : $"{bar} {percent}%";
     }
+
+    /// <summary>Перевожу время из UTC в локальное для показа пользователю.</summary>
+    private static DateTimeOffset ToLocal(DateTime utc, TimeSpan offset) =>
+        new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToOffset(offset);
 
     /// <summary>Человеческая длительность: «5 ч 20 мин».</summary>
     public static string Duration(TimeSpan value)

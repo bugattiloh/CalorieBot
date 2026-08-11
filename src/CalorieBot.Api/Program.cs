@@ -47,6 +47,7 @@ builder.Services.AddScoped<BotMessenger>();
 builder.Services.AddScoped<UpdateRouter>();
 builder.Services.AddScoped<MealScenario>();
 builder.Services.AddScoped<FavoritesScenario>();
+builder.Services.AddScoped<DishScenario>();
 builder.Services.AddScoped<LimitScenario>();
 builder.Services.AddScoped<ProgressScenario>();
 builder.Services.AddScoped<CycleScenario>();

@@ -172,4 +172,75 @@ public class ProgressServiceTests
         Assert.Contains(progress.FittingFavorites, p => p.Name == "Влезает");
         Assert.DoesNotContain(progress.FittingFavorites, p => p.Name == "Слишком жирный");
     }
+
+    [Fact]
+    public async Task GetReportAsync_WithNoEntries_ReportsZeroDaysWithData()
+    {
+        var h = CreateHarness();
+        await h.Users.GetOrCreateAsync(1, null, null, CancellationToken.None);
+
+        var report = await h.Progress.GetReportAsync(1, periodDays: 7, CancellationToken.None);
+
+        Assert.Equal(0, report.DaysWithData);
+        Assert.Null(report.LastDayWithData);
+    }
+
+    [Fact]
+    public async Task GetReportAsync_ExcludesTodaysEntries_OnlyCountsCompletedDays()
+    {
+        var h = CreateHarness();
+        // «Сегодня» по местному времени (UTC+3) — 8 августа, 12:00 UTC = 15:00 местного.
+        h.Clock.UtcNow = new DateTime(2026, 8, 8, 12, 0, 0, DateTimeKind.Utc);
+        await h.Users.GetOrCreateAsync(1, null, null, CancellationToken.None);
+
+        // Вчера, 7 августа местного — попадает в отчёт.
+        h.Clock.UtcNow = new DateTime(2026, 8, 7, 12, 0, 0, DateTimeKind.Utc);
+        await h.FoodLog.LogAsync(1, ProductDraft.FromMacros("Вчерашний обед", 30, 10, 40), MealType.Lunch, null, CancellationToken.None);
+
+        // Сегодня — ещё не закончился день, в отчёт попадать не должен.
+        h.Clock.UtcNow = new DateTime(2026, 8, 8, 12, 0, 0, DateTimeKind.Utc);
+        await h.FoodLog.LogAsync(1, ProductDraft.FromMacros("Сегодняшний завтрак", 10, 5, 10), MealType.Breakfast, null, CancellationToken.None);
+
+        var report = await h.Progress.GetReportAsync(1, periodDays: 7, CancellationToken.None);
+
+        Assert.Equal(1, report.DaysWithData);
+        Assert.Equal(new DateOnly(2026, 8, 7), report.LastDayWithData);
+        Assert.Equal(30, report.LastDayProteins);
+    }
+
+    [Fact]
+    public async Task GetReportAsync_CountsDaysOverAndUnderCalorieLimit()
+    {
+        var h = CreateHarness();
+        h.Clock.UtcNow = new DateTime(2026, 8, 10, 9, 0, 0, DateTimeKind.Utc);
+        await h.Users.GetOrCreateAsync(1, null, null, CancellationToken.None);
+        await h.Users.UpdateCalorieLimitAsync(1, 1000, CancellationToken.None);
+
+        h.Clock.UtcNow = new DateTime(2026, 8, 8, 9, 0, 0, DateTimeKind.Utc);
+        await h.FoodLog.LogAsync(1, ProductDraft.FromMacros("День с перебором", 100, 50, 100), MealType.Lunch, null, CancellationToken.None); // 1250 ккал
+
+        h.Clock.UtcNow = new DateTime(2026, 8, 9, 9, 0, 0, DateTimeKind.Utc);
+        await h.FoodLog.LogAsync(1, ProductDraft.FromMacros("День с недобором", 10, 5, 10), MealType.Lunch, null, CancellationToken.None); // 90 ккал
+
+        h.Clock.UtcNow = new DateTime(2026, 8, 10, 9, 0, 0, DateTimeKind.Utc);
+        var report = await h.Progress.GetReportAsync(1, periodDays: 7, CancellationToken.None);
+
+        Assert.Equal(2, report.DaysWithData);
+        Assert.Equal(1, report.DaysOverCalorieLimit);
+        Assert.Equal(1, report.DaysUnderCalorieLimit);
+    }
+
+    [Fact]
+    public async Task GetReportAsync_IgnoresEntriesOlderThanPeriod()
+    {
+        var h = CreateHarness();
+        h.Clock.UtcNow = new DateTime(2026, 8, 1, 9, 0, 0, DateTimeKind.Utc);
+        await h.Users.GetOrCreateAsync(1, null, null, CancellationToken.None);
+        await h.FoodLog.LogAsync(1, ProductDraft.FromMacros("Давно", 10, 10, 10), MealType.Lunch, null, CancellationToken.None);
+
+        h.Clock.UtcNow = new DateTime(2026, 8, 20, 9, 0, 0, DateTimeKind.Utc);
+        var report = await h.Progress.GetReportAsync(1, periodDays: 7, CancellationToken.None);
+
+        Assert.Equal(0, report.DaysWithData);
+    }
 }

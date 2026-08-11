@@ -105,4 +105,100 @@ public class CycleServiceTests
 
         Assert.Empty(history);
     }
+
+    [Fact]
+    public async Task GetEntriesAsync_ReturnsOnlyEntriesWithinCycleBoundaries()
+    {
+        var h = CreateHarness();
+        h.Clock.UtcNow = new DateTime(2026, 8, 8, 9, 0, 0, DateTimeKind.Utc);
+        await h.Users.GetOrCreateAsync(1, null, null, CancellationToken.None);
+        await h.FoodLog.LogAsync(1, ProductDraft.FromMacros("Завтрак", 20, 10, 30), MealType.Breakfast, null, CancellationToken.None);
+
+        h.Clock.UtcNow = new DateTime(2026, 8, 8, 15, 0, 0, DateTimeKind.Utc);
+        var closed = await h.Cycles.StartNewCycleAsync(1, CancellationToken.None);
+
+        // Уже в новом цикле (чуть позже момента закрытия) — не должно попасть в старый.
+        h.Clock.UtcNow = new DateTime(2026, 8, 8, 15, 0, 1, DateTimeKind.Utc);
+        await h.FoodLog.LogAsync(1, ProductDraft.FromMacros("Ужин", 10, 10, 10), MealType.Dinner, null, CancellationToken.None);
+
+        var entries = await h.Cycles.GetEntriesAsync(1, closed.Id, CancellationToken.None);
+
+        Assert.Single(entries);
+        Assert.Equal("Завтрак", entries[0].ProductName);
+    }
+
+    [Fact]
+    public async Task GetAsync_WithOtherUsersCycle_ReturnsNull()
+    {
+        var h = CreateHarness();
+        await h.Users.GetOrCreateAsync(1, null, null, CancellationToken.None);
+        var closed = await h.Cycles.StartNewCycleAsync(1, CancellationToken.None);
+
+        var found = await h.Cycles.GetAsync(2, closed.Id, CancellationToken.None);
+
+        Assert.Null(found);
+    }
+
+    [Fact]
+    public async Task DeleteEntryAsync_RemovesEntryAndRecomputesCycleSnapshot()
+    {
+        var h = CreateHarness();
+        h.Clock.UtcNow = new DateTime(2026, 8, 8, 9, 0, 0, DateTimeKind.Utc);
+        await h.Users.GetOrCreateAsync(1, null, null, CancellationToken.None);
+        await h.FoodLog.LogAsync(1, ProductDraft.FromMacros("Завтрак", 20, 10, 30), MealType.Breakfast, null, CancellationToken.None); // 290 ккал
+        await h.FoodLog.LogAsync(1, ProductDraft.FromMacros("Обед", 30, 10, 50), MealType.Lunch, null, CancellationToken.None); // 410 ккал
+
+        h.Clock.UtcNow = new DateTime(2026, 8, 8, 15, 0, 0, DateTimeKind.Utc);
+        var closed = await h.Cycles.StartNewCycleAsync(1, CancellationToken.None);
+        Assert.Equal(700, closed.ConsumedCalories);
+
+        var entries = await h.Cycles.GetEntriesAsync(1, closed.Id, CancellationToken.None);
+        var breakfast = entries.Single(e => e.ProductName == "Завтрак");
+
+        var deleted = await h.Cycles.DeleteEntryAsync(1, closed.Id, breakfast.Id, CancellationToken.None);
+
+        Assert.True(deleted);
+        var refreshed = await h.Cycles.GetAsync(1, closed.Id, CancellationToken.None);
+        Assert.Equal(410, refreshed!.ConsumedCalories);
+        Assert.Equal(1, refreshed.EntriesCount);
+    }
+
+    [Fact]
+    public async Task DeleteEntryAsync_WithUnknownEntry_ReturnsFalse()
+    {
+        var h = CreateHarness();
+        await h.Users.GetOrCreateAsync(1, null, null, CancellationToken.None);
+        var closed = await h.Cycles.StartNewCycleAsync(1, CancellationToken.None);
+
+        var deleted = await h.Cycles.DeleteEntryAsync(1, closed.Id, entryId: 999, CancellationToken.None);
+
+        Assert.False(deleted);
+    }
+
+    [Fact]
+    public async Task AddEntryAsync_AddsEntryWithinCycleBoundariesAndRecomputesSnapshot()
+    {
+        var h = CreateHarness();
+        h.Clock.UtcNow = new DateTime(2026, 8, 8, 9, 0, 0, DateTimeKind.Utc);
+        await h.Users.GetOrCreateAsync(1, null, null, CancellationToken.None);
+
+        h.Clock.UtcNow = new DateTime(2026, 8, 8, 15, 0, 0, DateTimeKind.Utc);
+        var closed = await h.Cycles.StartNewCycleAsync(1, CancellationToken.None);
+        Assert.Equal(0, closed.ConsumedCalories);
+
+        var draft = ProductDraft.FromMacros("Забытый перекус", 5, 5, 10);
+        var entry = await h.Cycles.AddEntryAsync(1, closed.Id, draft, MealType.Snack, CancellationToken.None);
+
+        Assert.Equal(draft.Calories, entry.Calories);
+        Assert.True(entry.LoggedAt <= closed.EndedAt);
+        Assert.True(entry.LoggedAt >= closed.StartedAt);
+
+        var refreshed = await h.Cycles.GetAsync(1, closed.Id, CancellationToken.None);
+        Assert.Equal(draft.Calories, refreshed!.ConsumedCalories);
+        Assert.Equal(1, refreshed.EntriesCount);
+
+        // Не должна попасть в текущий (новый) цикл.
+        var currentEntries = await h.FoodLog.GetCurrentCycleAsync(1, CancellationToken.None);
+        Assert.Empty(currentEntries);
+    }
 }

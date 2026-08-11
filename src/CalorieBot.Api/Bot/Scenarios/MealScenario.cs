@@ -124,16 +124,19 @@ public sealed class MealScenario
 
         if (!favorite.IsFixedServing)
         {
-            // КБЖУ у такого избранного хранятся на 100 г — прежде чем считать, узнаю фактический вес порции.
+            // КБЖУ у такого избранного хранятся на 100 г (или на 1 л для «Воды») — прежде чем считать,
+            // узнаю фактический объём/вес порции.
             context.ProductName = favorite.Name;
             context.Proteins = favorite.Proteins;
             context.Fats = favorite.Fats;
             context.Carbs = favorite.Carbs;
             context.MacrosPerHundredGrams = true;
+            context.IsLiterServing = favorite.CategoryKind == FavoriteCategoryKind.Water;
             context.State = ConversationState.AwaitingMealServingGrams;
 
+            var prompt = context.IsLiterServing ? Texts.AskServingLiters : Texts.AskServingGrams;
             await _messenger.AnswerAsync(query, ct: ct);
-            await _messenger.EditAsync(query.Message.Chat.Id, query.Message.MessageId, Texts.AskServingGrams, replyMarkup: null, ct);
+            await _messenger.EditAsync(query.Message.Chat.Id, query.Message.MessageId, prompt, replyMarkup: null, ct);
             return;
         }
 
@@ -241,16 +244,37 @@ public sealed class MealScenario
         await OfferToSaveFavoriteAsync(chatId, context, draft, ct);
     }
 
-    /// <summary>Принимаю вес порции и пересчитываю запомненные БЖУ со 100 г на реальную порцию.</summary>
+    /// <summary>Принимаю вес/объём порции и пересчитываю запомненные БЖУ (со 100 г или с 1 л) на реальную порцию.</summary>
     public async Task HandleServingGramsAsync(long chatId, long userId, string? text, CancellationToken ct)
     {
-        if (!InputParser.TryParseServingGrams(text, out var grams, out var error))
-        {
-            await _messenger.SendAsync(chatId, Texts.ValidationError(error), Keyboards.MealMenu, ct);
-            return;
-        }
-
         var context = _states.Get(userId);
+
+        decimal scale;
+        string servingSizeText;
+
+        if (context.IsLiterServing)
+        {
+            if (!InputParser.TryParseLiters(text, out var liters, out var literError))
+            {
+                await _messenger.SendAsync(chatId, Texts.ValidationError(literError), Keyboards.MealMenu, ct);
+                return;
+            }
+
+            scale = liters;
+            servingSizeText = $"{Texts.Num(liters)} л";
+        }
+        else
+        {
+            if (!InputParser.TryParseServingGrams(text, out var grams, out var error))
+            {
+                await _messenger.SendAsync(chatId, Texts.ValidationError(error), Keyboards.MealMenu, ct);
+                return;
+            }
+
+            // В context.Proteins/Fats/Carbs сейчас лежат значения на 100 г — масштабирую на введённый вес.
+            scale = grams / 100m;
+            servingSizeText = $"{grams} г";
+        }
 
         if (string.IsNullOrWhiteSpace(context.ProductName))
         {
@@ -258,14 +282,12 @@ public sealed class MealScenario
             return;
         }
 
-        // В context.Proteins/Fats/Carbs сейчас лежат значения на 100 г — масштабирую на введённый вес.
-        var scale = grams / 100m;
         var draft = ProductDraft.FromMacros(
             context.ProductName,
             Math.Round(context.Proteins * scale, 1),
             Math.Round(context.Fats * scale, 1),
             Math.Round(context.Carbs * scale, 1),
-            servingSize: $"{grams} г");
+            servingSize: servingSizeText);
 
         if (context.FavoriteProductId.HasValue)
         {
@@ -336,7 +358,10 @@ public sealed class MealScenario
             ct);
     }
 
-    /// <summary>Финальный шаг: записываю продукт в дневник и показываю обновлённый прогресс.</summary>
+    /// <summary>
+    /// Пользователь выбрал тип приёма пищи. Если продукт с таким же названием уже записан в этом цикле —
+    /// сперва спрашиваю, заменить старую запись или добавить новую отдельно.
+    /// </summary>
     public async Task HandleMealTypeAsync(CallbackQuery query, string? argument, CancellationToken ct)
     {
         if (query.Message is null)
@@ -360,10 +385,70 @@ public sealed class MealScenario
             return;
         }
 
+        var duplicate = await FindDuplicateInCurrentCycleAsync(userId, context.ProductName, ct);
+        if (duplicate is not null)
+        {
+            await _messenger.AnswerAsync(query, ct: ct);
+            await _messenger.EditAsync(
+                query.Message.Chat.Id,
+                query.Message.MessageId,
+                Texts.AskDuplicateMealConfirm(duplicate, context.ToDraft()),
+                Keyboards.DuplicateMealConfirm(rawMealType, duplicate.Id),
+                ct);
+            return;
+        }
+
+        await LogMealAndShowResultAsync(query, userId, context, (MealType)rawMealType, ct);
+    }
+
+    /// <summary>Ответ на предупреждение о повторном названии: заменить прошлую запись или добавить рядом с ней.</summary>
+    public async Task HandleDuplicateMealConfirmAsync(CallbackQuery query, string? argument, CancellationToken ct)
+    {
+        if (query.Message is null)
+        {
+            await _messenger.AnswerAsync(query, Texts.StaleDialog, ct: ct);
+            return;
+        }
+
+        var userId = query.From.Id;
+        var context = _states.Get(userId);
+
+        var parts = (argument ?? string.Empty).Split(':');
+        if (parts.Length != 3
+            || !int.TryParse(parts[1], out var rawMealType) || !Enum.IsDefined(typeof(MealType), rawMealType)
+            || !int.TryParse(parts[2], out var entryId)
+            || string.IsNullOrEmpty(context.ProductName))
+        {
+            await _messenger.AnswerAsync(query, Texts.StaleDialog, showAlert: true, ct: ct);
+            return;
+        }
+
+        if (parts[0] == "yes")
+        {
+            await _foodLog.DeleteAsync(userId, entryId, ct);
+        }
+
+        await LogMealAndShowResultAsync(query, userId, context, (MealType)rawMealType, ct);
+    }
+
+    /// <summary>Ищу в текущем цикле последнюю запись с тем же названием продукта (без учёта регистра).</summary>
+    private async Task<FoodLogEntry?> FindDuplicateInCurrentCycleAsync(long userId, string productName, CancellationToken ct)
+    {
+        var entries = await _foodLog.GetCurrentCycleAsync(userId, ct);
+        return entries
+            .Where(e => string.Equals(e.ProductName, productName, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(e => e.LoggedAt)
+            .FirstOrDefault();
+    }
+
+    /// <summary>Финальный шаг: записываю продукт в дневник и показываю обновлённый прогресс.</summary>
+    private async Task LogMealAndShowResultAsync(
+        CallbackQuery query, long userId, ConversationContext context, MealType mealType, CancellationToken ct)
+    {
         var entry = await _foodLog.LogAsync(
             userId,
             context.ToDraft(),
-            (MealType)rawMealType,
+            mealType,
             context.FavoriteProductId,
             ct);
 
@@ -374,7 +459,7 @@ public sealed class MealScenario
 
         await _messenger.AnswerAsync(query, "Записал ✅", ct: ct);
         await _messenger.EditAsync(
-            query.Message.Chat.Id,
+            query.Message!.Chat.Id,
             query.Message.MessageId,
             Texts.MealLogged(entry, progress),
             Keyboards.AfterMealLogged,

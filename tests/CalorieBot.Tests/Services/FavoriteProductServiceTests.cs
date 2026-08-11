@@ -1,5 +1,6 @@
 using CalorieBot.Core.Models;
 using CalorieBot.Core.Services;
+using CalorieBot.Data.Entities;
 using CalorieBot.Tests.TestSupport;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -155,5 +156,217 @@ public class FavoriteProductServiceTests
 
         Assert.Single(firstRead);
         Assert.Equal(2, secondRead.Count);
+    }
+
+    // ------------------------------------------------------------------
+    // Категории «Продуктов»
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetProductCategoriesAsync_SeedsFourBuiltInCategories_OnFirstCall()
+    {
+        var service = CreateService(out _);
+
+        var categories = await service.GetProductCategoriesAsync(1, CancellationToken.None);
+
+        Assert.Equal(4, categories.Count);
+        Assert.All(categories, c => Assert.True(c.IsBuiltIn));
+    }
+
+    [Fact]
+    public async Task GetProductCategoriesAsync_DoesNotReseed_OnSecondCall()
+    {
+        var service = CreateService(out _);
+        await service.GetProductCategoriesAsync(1, CancellationToken.None);
+
+        var categories = await service.GetProductCategoriesAsync(1, CancellationToken.None);
+
+        Assert.Equal(4, categories.Count);
+    }
+
+    [Fact]
+    public async Task CreateProductCategoryAsync_AddsCustomCategory_NotMarkedBuiltIn()
+    {
+        var service = CreateService(out _);
+
+        var category = await service.CreateProductCategoryAsync(1, "Напитки", CancellationToken.None);
+
+        Assert.False(category.IsBuiltIn);
+        Assert.Equal("Напитки", category.Name);
+    }
+
+    [Fact]
+    public async Task RenameProductCategoryAsync_UpdatesName()
+    {
+        var service = CreateService(out _);
+        var category = await service.CreateProductCategoryAsync(1, "Старое имя", CancellationToken.None);
+
+        var renamed = await service.RenameProductCategoryAsync(1, category.Id, "Новое имя", CancellationToken.None);
+
+        Assert.NotNull(renamed);
+        Assert.Equal("Новое имя", renamed!.Name);
+    }
+
+    [Fact]
+    public async Task RenameProductCategoryAsync_WithOtherUsersCategory_ReturnsNull()
+    {
+        var service = CreateService(out _);
+        var category = await service.CreateProductCategoryAsync(1, "Категория", CancellationToken.None);
+
+        var renamed = await service.RenameProductCategoryAsync(2, category.Id, "Другое имя", CancellationToken.None);
+
+        Assert.Null(renamed);
+    }
+
+    [Fact]
+    public async Task DeleteProductCategoryAsync_ReassignsProductsToUncategorized_InsteadOfDeletingThem()
+    {
+        var service = CreateService(out _);
+        var category = await service.CreateProductCategoryAsync(1, "Крупы", CancellationToken.None);
+        var draft = ProductDraft.FromMacros("Гречка", 12, 3, 60);
+        var (_, product) = await service.AddOrUpdateAsync(
+            1, draft, isFixedServing: true, CancellationToken.None, FavoriteCategoryKind.Product, category.Id);
+
+        var deleted = await service.DeleteProductCategoryAsync(1, category.Id, CancellationToken.None);
+
+        Assert.True(deleted);
+        var refreshed = await service.GetAsync(1, product.Id, CancellationToken.None);
+        Assert.NotNull(refreshed);
+        Assert.Null(refreshed!.ProductCategoryId);
+    }
+
+    [Fact]
+    public async Task SetProductCategoryAsync_MovesProductToAnotherCategory()
+    {
+        var service = CreateService(out _);
+        var categoryA = await service.CreateProductCategoryAsync(1, "А", CancellationToken.None);
+        var categoryB = await service.CreateProductCategoryAsync(1, "Б", CancellationToken.None);
+        var (_, product) = await service.AddOrUpdateAsync(
+            1, ProductDraft.FromMacros("Рис", 7, 1, 78), isFixedServing: true, CancellationToken.None, FavoriteCategoryKind.Product, categoryA.Id);
+
+        var moved = await service.SetProductCategoryAsync(1, product.Id, categoryB.Id, CancellationToken.None);
+
+        Assert.NotNull(moved);
+        Assert.Equal(categoryB.Id, moved!.ProductCategoryId);
+    }
+
+    [Fact]
+    public async Task GetByCategoryAsync_FiltersByKindAndSubcategory()
+    {
+        var service = CreateService(out _);
+        var category = await service.CreateProductCategoryAsync(1, "Крупы", CancellationToken.None);
+        await service.AddOrUpdateAsync(
+            1, ProductDraft.FromMacros("Гречка", 12, 3, 60), isFixedServing: true, CancellationToken.None, FavoriteCategoryKind.Product, category.Id);
+        await service.AddOrUpdateAsync(
+            1, ProductDraft.FromMacros("Рис", 7, 1, 78), isFixedServing: true, CancellationToken.None, FavoriteCategoryKind.Product, null);
+        await service.EnsureWaterSeedAsync(1, CancellationToken.None);
+
+        var inCategory = await service.GetByCategoryAsync(1, FavoriteCategoryKind.Product, category.Id, CancellationToken.None);
+        var uncategorized = await service.GetByCategoryAsync(1, FavoriteCategoryKind.Product, null, CancellationToken.None);
+        var water = await service.GetByCategoryAsync(1, FavoriteCategoryKind.Water, null, CancellationToken.None);
+
+        Assert.Single(inCategory);
+        Assert.Equal("Гречка", inCategory[0].Name);
+        Assert.Single(uncategorized);
+        Assert.Equal("Рис", uncategorized[0].Name);
+        Assert.Single(water);
+        Assert.Equal("Вода", water[0].Name);
+    }
+
+    // ------------------------------------------------------------------
+    // Вода
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task EnsureWaterSeedAsync_CreatesEmptyWaterItem_OnFirstCall()
+    {
+        var service = CreateService(out _);
+
+        await service.EnsureWaterSeedAsync(1, CancellationToken.None);
+
+        var water = await service.GetByCategoryAsync(1, FavoriteCategoryKind.Water, null, CancellationToken.None);
+        Assert.Single(water);
+        Assert.Equal("Вода", water[0].Name);
+        Assert.Equal(0, water[0].Calories);
+        Assert.False(water[0].IsFixedServing);
+    }
+
+    [Fact]
+    public async Task EnsureWaterSeedAsync_DoesNotDuplicate_OnSecondCall()
+    {
+        var service = CreateService(out _);
+        await service.EnsureWaterSeedAsync(1, CancellationToken.None);
+
+        await service.EnsureWaterSeedAsync(1, CancellationToken.None);
+
+        var water = await service.GetByCategoryAsync(1, FavoriteCategoryKind.Water, null, CancellationToken.None);
+        Assert.Single(water);
+    }
+
+    // ------------------------------------------------------------------
+    // Готовые блюда
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task CreateDishAsync_CreatesFixedServingDishWithZeroMacros()
+    {
+        var service = CreateService(out _);
+
+        var dish = await service.CreateDishAsync(1, "Овсянка с бананом", CancellationToken.None);
+
+        Assert.Equal(FavoriteCategoryKind.Dish, dish.CategoryKind);
+        Assert.True(dish.IsFixedServing);
+        Assert.Equal(0, dish.Calories);
+    }
+
+    [Fact]
+    public async Task AddDishIngredientAsync_RecomputesDishTotals_AsSumOfIngredients()
+    {
+        var service = CreateService(out _);
+        var dish = await service.CreateDishAsync(1, "Овсянка с бананом", CancellationToken.None);
+
+        await service.AddDishIngredientAsync(1, dish.Id, ProductDraft.FromMacros("Овсянка", 10, 5, 40), CancellationToken.None);
+        var updated = await service.AddDishIngredientAsync(1, dish.Id, ProductDraft.FromMacros("Банан", 1, 0, 27), CancellationToken.None);
+
+        Assert.NotNull(updated);
+        Assert.Equal(11, updated!.Proteins);
+        Assert.Equal(5, updated.Fats);
+        Assert.Equal(67, updated.Carbs);
+
+        var ingredients = await service.GetDishIngredientsAsync(1, dish.Id, CancellationToken.None);
+        Assert.Equal(2, ingredients.Count);
+    }
+
+    [Fact]
+    public async Task RemoveDishIngredientAsync_RecomputesDishTotals_AfterRemoval()
+    {
+        var service = CreateService(out _);
+        var dish = await service.CreateDishAsync(1, "Салат", CancellationToken.None);
+        await service.AddDishIngredientAsync(1, dish.Id, ProductDraft.FromMacros("Огурец", 1, 0, 3), CancellationToken.None);
+        var afterSecond = await service.AddDishIngredientAsync(1, dish.Id, ProductDraft.FromMacros("Масло", 0, 10, 0), CancellationToken.None);
+
+        // EF трекает FavoriteProduct по Id — afterSecond и updated окажутся одним и тем же объектом,
+        // поэтому калорийность «до удаления» фиксирую в отдельную переменную заранее.
+        var caloriesBeforeRemoval = afterSecond!.Calories;
+
+        var ingredients = await service.GetDishIngredientsAsync(1, dish.Id, CancellationToken.None);
+        var oilIngredient = ingredients.Single(i => i.Name == "Масло");
+
+        var updated = await service.RemoveDishIngredientAsync(1, dish.Id, oilIngredient.Id, CancellationToken.None);
+
+        Assert.NotNull(updated);
+        Assert.Equal(0, updated!.Fats);
+        Assert.True(updated.Calories < caloriesBeforeRemoval);
+    }
+
+    [Fact]
+    public async Task AddDishIngredientAsync_WithOtherUsersDish_ReturnsNull()
+    {
+        var service = CreateService(out _);
+        var dish = await service.CreateDishAsync(1, "Салат", CancellationToken.None);
+
+        var result = await service.AddDishIngredientAsync(2, dish.Id, ProductDraft.FromMacros("Огурец", 1, 0, 3), CancellationToken.None);
+
+        Assert.Null(result);
     }
 }

@@ -9,6 +9,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace CalorieBot.Tests.Scenarios;
 
@@ -125,5 +126,158 @@ public class CycleScenarioTests
 
         Assert.Single(h.Bot.Sent);
         Assert.Contains("1950", h.Bot.Sent[0].Text);
+    }
+
+    private static CalorieCycle BuildCycle(int id, int calories = 1000, int limit = 2000) => new()
+    {
+        Id = id,
+        UserId = UserId,
+        StartedAt = new DateTime(2026, 8, 7, 9, 0, 0, DateTimeKind.Utc),
+        EndedAt = new DateTime(2026, 8, 8, 9, 0, 0, DateTimeKind.Utc),
+        CalorieLimit = limit,
+        ConsumedCalories = calories,
+        EntriesCount = 1
+    };
+
+    [Fact]
+    public async Task HandleCycleDetailsAsync_WithKnownCycle_ShowsCardWithEntries()
+    {
+        var h = CreateHarness();
+        var cycle = BuildCycle(5);
+        var entry = new FoodLogEntry { Id = 1, UserId = UserId, ProductName = "Гречка", Calories = 300, MealType = MealType.Lunch, LoggedAt = cycle.EndedAt.AddHours(-1) };
+        h.Cycles.Setup(c => c.GetAsync(UserId, 5, It.IsAny<CancellationToken>())).ReturnsAsync(cycle);
+        h.Cycles.Setup(c => c.GetEntriesAsync(UserId, 5, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { entry });
+
+        var query = BuildCallbackQuery("cd:5");
+        await h.Scenario.HandleCycleDetailsAsync(query, argument: "5", CancellationToken.None);
+
+        Assert.Single(h.Bot.Edited);
+        var keyboard = Assert.IsType<InlineKeyboardMarkup>(h.Bot.Edited[0].ReplyMarkup);
+        Assert.Contains(keyboard.InlineKeyboard.SelectMany(row => row), button => button.Text.Contains("Гречка"));
+    }
+
+    [Fact]
+    public async Task HandleCycleDetailsAsync_WithUnknownCycle_ShowsNotFoundMessage()
+    {
+        var h = CreateHarness();
+        h.Cycles.Setup(c => c.GetAsync(UserId, 5, It.IsAny<CancellationToken>())).ReturnsAsync((CalorieCycle?)null);
+
+        var query = BuildCallbackQuery("cd:5");
+        await h.Scenario.HandleCycleDetailsAsync(query, argument: "5", CancellationToken.None);
+
+        Assert.Single(h.Bot.Edited);
+        Assert.Contains("не найден", h.Bot.Edited[0].Text);
+    }
+
+    [Fact]
+    public async Task HandleEntryDeleteRequestAsync_WithKnownEntry_AsksConfirmation()
+    {
+        var h = CreateHarness();
+        var cycle = BuildCycle(5);
+        var entry = new FoodLogEntry { Id = 7, UserId = UserId, ProductName = "Гречка", Calories = 300, MealType = MealType.Lunch, LoggedAt = cycle.EndedAt.AddHours(-1) };
+        h.Cycles.Setup(c => c.GetEntriesAsync(UserId, 5, It.IsAny<CancellationToken>())).ReturnsAsync(new[] { entry });
+
+        var query = BuildCallbackQuery("cedr:5:7");
+        await h.Scenario.HandleEntryDeleteRequestAsync(query, argument: "5:7", CancellationToken.None);
+
+        Assert.Single(h.Bot.Edited);
+        Assert.Contains("Удалить эту запись", h.Bot.Edited[0].Text);
+    }
+
+    [Fact]
+    public async Task HandleEntryDeleteConfirmAsync_DeletesAndShowsRefreshedCard()
+    {
+        var h = CreateHarness();
+        var cycle = BuildCycle(5, calories: 700);
+        h.Cycles.Setup(c => c.DeleteEntryAsync(UserId, 5, 7, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        h.Cycles.Setup(c => c.GetAsync(UserId, 5, It.IsAny<CancellationToken>())).ReturnsAsync(cycle);
+        h.Cycles.Setup(c => c.GetEntriesAsync(UserId, 5, It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<FoodLogEntry>());
+
+        var query = BuildCallbackQuery("cedc:5:7");
+        await h.Scenario.HandleEntryDeleteConfirmAsync(query, argument: "5:7", CancellationToken.None);
+
+        h.Cycles.Verify(c => c.DeleteEntryAsync(UserId, 5, 7, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Single(h.Bot.Edited);
+        Assert.Contains("700", h.Bot.Edited[0].Text);
+    }
+
+    [Fact]
+    public async Task StartAddEntryAsync_WithKnownCycle_AsksForProductName()
+    {
+        var h = CreateHarness();
+        var cycle = BuildCycle(5);
+        h.Cycles.Setup(c => c.GetAsync(UserId, 5, It.IsAny<CancellationToken>())).ReturnsAsync(cycle);
+
+        var query = BuildCallbackQuery("cae:5");
+        await h.Scenario.StartAddEntryAsync(query, argument: "5", CancellationToken.None);
+
+        var context = h.States.Get(UserId);
+        Assert.Equal(5, context.EditingCycleId);
+        Assert.Equal(ConversationState.AwaitingCycleEntryName, context.State);
+        Assert.Single(h.Bot.Edited);
+    }
+
+    [Fact]
+    public async Task HandleEntryNameAsync_WithValidName_StoresItAndAsksMacros()
+    {
+        var h = CreateHarness();
+        var context = h.States.Get(UserId);
+        context.EditingCycleId = 5;
+        context.State = ConversationState.AwaitingCycleEntryName;
+
+        await h.Scenario.HandleEntryNameAsync(ChatId, UserId, "Гречка", CancellationToken.None);
+
+        Assert.Equal("Гречка", context.ProductName);
+        Assert.Equal(ConversationState.AwaitingCycleEntryMacros, context.State);
+        Assert.Single(h.Bot.Sent);
+    }
+
+    [Fact]
+    public async Task HandleEntryMacrosAsync_WithValidMacros_AsksForMealType()
+    {
+        var h = CreateHarness();
+        var context = h.States.Get(UserId);
+        context.EditingCycleId = 5;
+        context.ProductName = "Гречка";
+        context.State = ConversationState.AwaitingCycleEntryMacros;
+
+        await h.Scenario.HandleEntryMacrosAsync(ChatId, UserId, "12 5 30", CancellationToken.None);
+
+        Assert.Equal(213, context.Calories);
+        Assert.Equal(ConversationState.Idle, context.State);
+        Assert.Single(h.Bot.Sent);
+    }
+
+    [Fact]
+    public async Task HandleEntryMealTypeAsync_AddsEntryAndShowsRefreshedCard()
+    {
+        var h = CreateHarness();
+        var context = h.States.Get(UserId);
+        context.Apply(ProductDraft.FromMacros("Гречка", 12, 5, 30));
+
+        var cycle = BuildCycle(5, calories: 213);
+        h.Cycles.Setup(c => c.GetAsync(UserId, 5, It.IsAny<CancellationToken>())).ReturnsAsync(cycle);
+        h.Cycles.Setup(c => c.GetEntriesAsync(UserId, 5, It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<FoodLogEntry>());
+        h.Cycles.Setup(c => c.AddEntryAsync(UserId, 5, It.IsAny<ProductDraft>(), MealType.Lunch, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FoodLogEntry { Id = 1, UserId = UserId, ProductName = "Гречка", Calories = 213, MealType = MealType.Lunch });
+
+        var query = BuildCallbackQuery("cemt:5:2");
+        await h.Scenario.HandleEntryMealTypeAsync(query, argument: "5:2", CancellationToken.None);
+
+        h.Cycles.Verify(c => c.AddEntryAsync(UserId, 5, It.IsAny<ProductDraft>(), MealType.Lunch, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Null(h.States.Get(UserId).ProductName);
+        Assert.Single(h.Bot.Edited);
+    }
+
+    [Fact]
+    public async Task HandleEntryMealTypeAsync_WithStaleDialog_DoesNotAddEntry()
+    {
+        var h = CreateHarness(); // контекст пуст — ProductName не задан
+
+        var query = BuildCallbackQuery("cemt:5:2");
+        await h.Scenario.HandleEntryMealTypeAsync(query, argument: "5:2", CancellationToken.None);
+
+        h.Cycles.Verify(c => c.AddEntryAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<ProductDraft>(), It.IsAny<MealType>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Single(h.Bot.AnsweredCallbackIds);
     }
 }

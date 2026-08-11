@@ -14,6 +14,12 @@ public interface IProgressService
 
     /// <summary>Только избранное, которое вписывается в остаток по правилам <paramref name="progress"/> (см. <see cref="DailyProgress.Fits"/>).</summary>
     Task<IReadOnlyList<FavoriteProduct>> GetFittingFavoritesAsync(long userId, DailyProgress progress, CancellationToken ct);
+
+    /// <summary>
+    /// Сводка за <paramref name="periodDays"/> последних завершённых календарных дней (сегодняшний
+    /// день ещё не закончился, поэтому в отчёт не попадает).
+    /// </summary>
+    Task<PeriodReport> GetReportAsync(long userId, int periodDays, CancellationToken ct);
 }
 
 /// <inheritdoc />
@@ -95,5 +101,62 @@ public sealed class ProgressService : IProgressService
             : fitting.OrderByDescending(p => p.Calories).ThenBy(p => p.Name);
 
         return fitting.Take(MaxFittingFavorites).ToList();
+    }
+
+    public async Task<PeriodReport> GetReportAsync(long userId, int periodDays, CancellationToken ct)
+    {
+        var user = await _users.GetAsync(userId, ct);
+
+        var todayLocal = DateOnly.FromDateTime(_clock.UtcNow + _clock.Offset);
+        var periodStartLocal = todayLocal.AddDays(-periodDays);
+
+        // Верхняя граница — начало сегодняшнего дня: сегодняшний, ещё не законченный день в отчёт не включаю.
+        var periodStartUtc = periodStartLocal.ToDateTime(TimeOnly.MinValue) - _clock.Offset;
+        var periodEndUtc = todayLocal.ToDateTime(TimeOnly.MinValue) - _clock.Offset;
+
+        var entries = await _db.FoodLog
+            .AsNoTracking()
+            .Where(e => e.UserId == userId && e.LoggedAt >= periodStartUtc && e.LoggedAt < periodEndUtc)
+            .ToListAsync(ct);
+
+        // Группирую по локальному календарному дню на стороне клиента — данных за месяц немного,
+        // а трансляция такого группирования в SQL приносит больше риска, чем пользы.
+        var byDay = entries
+            .GroupBy(e => DateOnly.FromDateTime(e.LoggedAt + _clock.Offset))
+            .Select(g => new
+            {
+                Day = g.Key,
+                Calories = g.Sum(e => e.Calories),
+                Proteins = g.Sum(e => e.Proteins),
+                Fats = g.Sum(e => e.Fats),
+                Carbs = g.Sum(e => e.Carbs)
+            })
+            .OrderBy(d => d.Day)
+            .ToList();
+
+        var daysWithData = byDay.Count;
+        var last = byDay.Count == 0 ? null : byDay[^1];
+
+        return new PeriodReport
+        {
+            PeriodDays = periodDays,
+            DaysWithData = daysWithData,
+            TrackingMode = user.TrackingMode,
+            CalorieLimit = user.DailyCalorieLimit,
+            AverageCalories = daysWithData == 0 ? 0 : (int)Math.Round(byDay.Average(d => d.Calories), MidpointRounding.AwayFromZero),
+            DaysOverCalorieLimit = byDay.Count(d => d.Calories > user.DailyCalorieLimit),
+            DaysUnderCalorieLimit = byDay.Count(d => d.Calories < user.DailyCalorieLimit),
+            ProteinsLimit = user.DailyProteinsLimit,
+            FatsLimit = user.DailyFatsLimit,
+            CarbsLimit = user.DailyCarbsLimit,
+            AverageProteins = daysWithData == 0 ? 0m : Math.Round(byDay.Average(d => d.Proteins), 1),
+            AverageFats = daysWithData == 0 ? 0m : Math.Round(byDay.Average(d => d.Fats), 1),
+            AverageCarbs = daysWithData == 0 ? 0m : Math.Round(byDay.Average(d => d.Carbs), 1),
+            LastDayWithData = last?.Day,
+            LastDayCalories = last?.Calories ?? 0,
+            LastDayProteins = last?.Proteins ?? 0m,
+            LastDayFats = last?.Fats ?? 0m,
+            LastDayCarbs = last?.Carbs ?? 0m
+        };
     }
 }

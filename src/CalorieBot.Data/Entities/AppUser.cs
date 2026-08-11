@@ -54,4 +54,6 @@ public class AppUser
     public ICollection<FoodLogEntry> FoodLog { get; set; } = new List<FoodLogEntry>();
 
     public ICollection<CalorieCycle> Cycles { get; set; } = new List<CalorieCycle>();
+
+    public ICollection<ProductCategory> ProductCategories { get; set; } = new List<ProductCategory>();
 }

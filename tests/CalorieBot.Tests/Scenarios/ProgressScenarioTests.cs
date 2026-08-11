@@ -8,6 +8,7 @@ using CalorieBot.Tests.TestSupport;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Telegram.Bot.Types;
 
 namespace CalorieBot.Tests.Scenarios;
 
@@ -84,5 +85,55 @@ public class ProgressScenarioTests
 
         Assert.Single(h.Bot.Sent);
         Assert.Contains("Пока ничего не записано", h.Bot.Sent[0].Text);
+    }
+
+    private static CallbackQuery BuildCallbackQuery(string data) => new()
+    {
+        Id = "cb-1",
+        From = new User { Id = UserId, FirstName = "Test" },
+        Message = new Message { Id = 55, Chat = new Chat { Id = ChatId } },
+        Data = data
+    };
+
+    private static PeriodReport BuildReport(int periodDays, int daysWithData) => new()
+    {
+        PeriodDays = periodDays,
+        DaysWithData = daysWithData,
+        TrackingMode = CalorieTrackingMode.Calories,
+        CalorieLimit = 2000,
+        AverageCalories = 1800,
+        DaysOverCalorieLimit = 1,
+        DaysUnderCalorieLimit = 2,
+        AverageProteins = 100m,
+        AverageFats = 60m,
+        AverageCarbs = 200m,
+        LastDayWithData = new DateOnly(2026, 8, 7),
+        LastDayCalories = 1700
+    };
+
+    [Fact]
+    public async Task HandlePeriodReportAsync_WithValidPeriod_SendsReportMessage()
+    {
+        var h = CreateHarness();
+        h.Progress.Setup(p => p.GetReportAsync(UserId, 7, It.IsAny<CancellationToken>())).ReturnsAsync(BuildReport(7, 5));
+
+        var query = BuildCallbackQuery("pr:7");
+        await h.Scenario.HandlePeriodReportAsync(query, argument: "7", CancellationToken.None);
+
+        Assert.Single(h.Bot.Sent);
+        Assert.Contains("1800", h.Bot.Sent[0].Text);
+        Assert.Single(h.Bot.AnsweredCallbackIds);
+    }
+
+    [Fact]
+    public async Task HandlePeriodReportAsync_WithInvalidArgument_AnswersStaleDialog()
+    {
+        var h = CreateHarness();
+
+        var query = BuildCallbackQuery("pr:15");
+        await h.Scenario.HandlePeriodReportAsync(query, argument: "15", CancellationToken.None);
+
+        h.Progress.Verify(p => p.GetReportAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Empty(h.Bot.Sent);
     }
 }

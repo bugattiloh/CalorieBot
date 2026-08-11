@@ -11,6 +11,9 @@ public static class Keyboards
     /// <summary>Сколько продуктов показываю на одной странице инлайн-списка.</summary>
     public const int PageSize = 6;
 
+    /// <summary>Сколько прошлых циклов показываю на одной странице «Истории» — буквально 7 штук, не календарная неделя.</summary>
+    public const int CyclePageSize = 7;
+
     /// <summary>Главное меню — постоянная клавиатура, её пользователь видит всегда.</summary>
     public static ReplyKeyboardMarkup MainMenu { get; } = new(new[]
     {
@@ -35,10 +38,11 @@ public static class Keyboards
         IsPersistent = true
     };
 
-    /// <summary>Подменю «Любимые продукты».</summary>
+    /// <summary>Подменю «Избранное» — три группы вместо одного огромного списка.</summary>
     public static ReplyKeyboardMarkup FavoritesMenu { get; } = new(new[]
     {
-        new KeyboardButton[] { Buttons.AddFavorite, Buttons.MyProducts },
+        new KeyboardButton[] { Buttons.Water, Buttons.Dishes },
+        new KeyboardButton[] { Buttons.Products },
         new KeyboardButton[] { Buttons.DeleteFavorite },
         new KeyboardButton[] { Buttons.Back }
     })
@@ -91,19 +95,40 @@ public static class Keyboards
         new[] { InlineKeyboardButton.WithCallbackData("📏 На 100 г (порция плавающая)", Callbacks.Build(Callbacks.FavoriteMacrosMode, "100")) }
     });
 
-    /// <summary>Действия в карточке избранного продукта.</summary>
-    public static InlineKeyboardMarkup FavoriteDetailsActions(int favoriteId, bool isFixedServing) => new(new[]
+    /// <summary>
+    /// Действия в карточке избранного продукта — набор зависит от группы: у «Воды» нет типа порции
+    /// и переноса между подкатегориями, у «Продуктов» есть оба.
+    /// </summary>
+    public static InlineKeyboardMarkup FavoriteDetailsActions(FavoriteProduct product)
     {
-        new[] { InlineKeyboardButton.WithCallbackData("✏️ Изменить КБЖУ", Callbacks.Build(Callbacks.FavoriteEditMacros, favoriteId)) },
-        new[]
+        var rows = new List<InlineKeyboardButton[]>
         {
-            InlineKeyboardButton.WithCallbackData(
-                isFixedServing ? "🔁 Сделать порцию плавающей" : "🔁 Сделать порцию фиксированной",
-                Callbacks.Build(Callbacks.FavoriteToggleFixed, favoriteId))
-        },
-        new[] { InlineKeyboardButton.WithCallbackData("🗑 Удалить", Callbacks.Build(Callbacks.DeleteFavorite, favoriteId)) },
-        new[] { InlineKeyboardButton.WithCallbackData("◀️ К списку", Callbacks.Build(Callbacks.ListPage, 0)) }
-    });
+            new[] { InlineKeyboardButton.WithCallbackData("✏️ Изменить КБЖУ", Callbacks.Build(Callbacks.FavoriteEditMacros, product.Id)) }
+        };
+
+        if (product.CategoryKind == FavoriteCategoryKind.Product)
+        {
+            rows.Add(new[]
+            {
+                InlineKeyboardButton.WithCallbackData(
+                    product.IsFixedServing ? "🔁 Сделать порцию плавающей" : "🔁 Сделать порцию фиксированной",
+                    Callbacks.Build(Callbacks.FavoriteToggleFixed, product.Id))
+            });
+            rows.Add(new[]
+            {
+                InlineKeyboardButton.WithCallbackData("📂 В другую подкатегорию", Callbacks.Build(Callbacks.FavoriteMoveCategory, product.Id))
+            });
+        }
+
+        rows.Add(new[] { InlineKeyboardButton.WithCallbackData("🗑 Удалить", Callbacks.Build(Callbacks.DeleteFavorite, product.Id)) });
+
+        var backAction = product.CategoryKind == FavoriteCategoryKind.Water
+            ? Callbacks.Build(Callbacks.WaterPage, 0)
+            : Callbacks.Build(Callbacks.ProductCategoryPick, product.ProductCategoryId ?? 0);
+        rows.Add(new[] { InlineKeyboardButton.WithCallbackData("◀️ Назад", backAction) });
+
+        return new InlineKeyboardMarkup(rows);
+    }
 
     /// <summary>Предложение сохранить только что введённый продукт в избранное.</summary>
     public static InlineKeyboardMarkup SaveFavoriteConfirm { get; } = new(new[]
@@ -158,11 +183,89 @@ public static class Keyboards
         new[] { InlineKeyboardButton.WithCallbackData("🔙 В меню", Callbacks.ToMenu) }
     });
 
+    /// <summary>Выбор периода отчёта под экраном «Мой прогресс».</summary>
+    public static InlineKeyboardMarkup ProgressReportChoice { get; } = new(new[]
+    {
+        new[]
+        {
+            InlineKeyboardButton.WithCallbackData("📈 За неделю", Callbacks.Build(Callbacks.PeriodReport, 7)),
+            InlineKeyboardButton.WithCallbackData("📈 За месяц", Callbacks.Build(Callbacks.PeriodReport, 30))
+        }
+    });
+
+    /// <summary>Продукт с таким названием уже записан в этом цикле — предлагаю заменить или добавить отдельно.</summary>
+    public static InlineKeyboardMarkup DuplicateMealConfirm(int mealType, int entryId) => new(new[]
+    {
+        new[] { InlineKeyboardButton.WithCallbackData("♻️ Заменить предыдущую запись", Callbacks.Build(Callbacks.DuplicateMealConfirm, $"yes:{mealType}:{entryId}")) },
+        new[] { InlineKeyboardButton.WithCallbackData("➕ Добавить как новую", Callbacks.Build(Callbacks.DuplicateMealConfirm, $"no:{mealType}:{entryId}")) },
+        new[] { InlineKeyboardButton.WithCallbackData("❌ Отмена", Callbacks.ToMenu) }
+    });
+
     /// <summary>Подтверждение удаления продукта из избранного.</summary>
     public static InlineKeyboardMarkup DeleteConfirm(int favoriteId) => new(new[]
     {
         new[] { InlineKeyboardButton.WithCallbackData("🗑 Да, удалить", Callbacks.Build(Callbacks.DeleteConfirm, favoriteId)) },
         new[] { InlineKeyboardButton.WithCallbackData("◀️ Назад", Callbacks.Build(Callbacks.DeletePage, 0)) }
+    });
+
+    /// <summary>Список прошлых циклов страницей — тап по циклу открывает его карточку для редактирования.</summary>
+    public static InlineKeyboardMarkup CycleHistoryButtons(IReadOnlyList<CalorieCycle> cycles, int page, int pageSize, int totalPages)
+    {
+        var rows = new List<InlineKeyboardButton[]>();
+        var index = page * pageSize + 1;
+
+        foreach (var cycle in cycles)
+        {
+            rows.Add(new[] { InlineKeyboardButton.WithCallbackData($"✏️ Открыть цикл {index}", Callbacks.Build(Callbacks.CycleDetails, cycle.Id)) });
+            index++;
+        }
+
+        rows.AddRange(NavigationRows(page, totalPages, Callbacks.CycleHistoryPage));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    /// <summary>
+    /// Карточка прошлого цикла: каждая запись — отдельная кнопка удаления, плюс добавление новой записи.
+    /// </summary>
+    public static InlineKeyboardMarkup CycleDetailsActions(
+        int cycleId, IReadOnlyList<FoodLogEntry> entries, Func<FoodLogEntry, string> labelFactory)
+    {
+        var rows = new List<InlineKeyboardButton[]>();
+
+        foreach (var entry in entries.OrderBy(e => e.LoggedAt))
+        {
+            rows.Add(new[]
+            {
+                InlineKeyboardButton.WithCallbackData(labelFactory(entry), Callbacks.Build(Callbacks.CycleEntryDeleteRequest, $"{cycleId}:{entry.Id}"))
+            });
+        }
+
+        rows.Add(new[] { InlineKeyboardButton.WithCallbackData("➕ Добавить запись", Callbacks.Build(Callbacks.CycleAddEntry, cycleId)) });
+        rows.Add(new[] { InlineKeyboardButton.WithCallbackData("◀️ К истории", Callbacks.Build(Callbacks.CycleHistoryPage, 0)) });
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    /// <summary>Подтверждение удаления записи из прошлого цикла.</summary>
+    public static InlineKeyboardMarkup CycleEntryDeleteConfirm(int cycleId, int entryId) => new(new[]
+    {
+        new[] { InlineKeyboardButton.WithCallbackData("🗑 Да, удалить", Callbacks.Build(Callbacks.CycleEntryDeleteConfirm, $"{cycleId}:{entryId}")) },
+        new[] { InlineKeyboardButton.WithCallbackData("◀️ Назад", Callbacks.Build(Callbacks.CycleDetails, cycleId)) }
+    });
+
+    /// <summary>Выбор типа приёма пищи для записи, добавляемой задним числом в прошлый цикл.</summary>
+    public static InlineKeyboardMarkup CycleEntryMealTypes(int cycleId) => new(new[]
+    {
+        new[]
+        {
+            InlineKeyboardButton.WithCallbackData("🍳 Завтрак", Callbacks.Build(Callbacks.CycleEntryMealType, $"{cycleId}:{(int)MealType.Breakfast}")),
+            InlineKeyboardButton.WithCallbackData("🍲 Обед", Callbacks.Build(Callbacks.CycleEntryMealType, $"{cycleId}:{(int)MealType.Lunch}"))
+        },
+        new[]
+        {
+            InlineKeyboardButton.WithCallbackData("🍝 Ужин", Callbacks.Build(Callbacks.CycleEntryMealType, $"{cycleId}:{(int)MealType.Dinner}")),
+            InlineKeyboardButton.WithCallbackData("🍎 Перекус", Callbacks.Build(Callbacks.CycleEntryMealType, $"{cycleId}:{(int)MealType.Snack}"))
+        },
+        new[] { InlineKeyboardButton.WithCallbackData("◀️ Отмена", Callbacks.Build(Callbacks.CycleDetails, cycleId)) }
     });
 
     /// <summary>
@@ -197,6 +300,123 @@ public static class Keyboards
     /// <summary>Строки навигации для постраничных списков без выбора элементов.</summary>
     public static InlineKeyboardMarkup PageNavigation(int page, int totalPages, string pageAction) =>
         new(NavigationRows(page, totalPages, pageAction));
+
+    /// <summary>Список продуктов одной группы избранного (Вода/Готовые блюда/подкатегория Продуктов) плюс кнопка добавления.</summary>
+    public static InlineKeyboardMarkup CategoryItemList(
+        IReadOnlyList<FavoriteProduct> products,
+        int page,
+        string itemAction,
+        string pageAction,
+        string addActionData,
+        string addLabel,
+        Func<FavoriteProduct, string> labelFactory)
+    {
+        var totalPages = Math.Max(1, (int)Math.Ceiling(products.Count / (double)PageSize));
+        page = Math.Clamp(page, 0, totalPages - 1);
+
+        var rows = new List<InlineKeyboardButton[]>();
+
+        foreach (var product in products.Skip(page * PageSize).Take(PageSize))
+        {
+            rows.Add(new[] { InlineKeyboardButton.WithCallbackData(labelFactory(product), Callbacks.Build(itemAction, product.Id)) });
+        }
+
+        rows.Add(new[] { InlineKeyboardButton.WithCallbackData(addLabel, addActionData) });
+        rows.AddRange(NavigationRows(page, totalPages, pageAction));
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    /// <summary>
+    /// Подкатегории «Продуктов»: в обычном режиме — тап открывает список продуктов, в режиме управления —
+    /// карточку с переименованием/удалением.
+    /// </summary>
+    public static InlineKeyboardMarkup ProductCategoriesList(IReadOnlyList<ProductCategory> categories, bool hasUncategorized, bool manageMode)
+    {
+        var itemAction = manageMode ? Callbacks.ProductCategoryManagePick : Callbacks.ProductCategoryPick;
+        var rows = new List<InlineKeyboardButton[]>();
+
+        foreach (var category in categories)
+        {
+            rows.Add(new[] { InlineKeyboardButton.WithCallbackData(category.Name, Callbacks.Build(itemAction, category.Id)) });
+        }
+
+        // 0 — служебный «без подкатегории»: настоящие Id подкатегорий всегда положительные.
+        if (hasUncategorized && !manageMode)
+        {
+            rows.Add(new[] { InlineKeyboardButton.WithCallbackData("📦 Без категории", Callbacks.Build(itemAction, 0)) });
+        }
+
+        rows.Add(manageMode
+            ? new[] { InlineKeyboardButton.WithCallbackData("➕ Новая категория", Callbacks.ProductCategoryNew) }
+            : new[]
+            {
+                InlineKeyboardButton.WithCallbackData("➕ Новая категория", Callbacks.ProductCategoryNew),
+                InlineKeyboardButton.WithCallbackData("✏️ Управлять", Callbacks.ProductCategoryManage)
+            });
+
+        rows.Add(new[] { InlineKeyboardButton.WithCallbackData("🔙 В меню", Callbacks.ToMenu) });
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    /// <summary>Действия с подкатегорией в режиме управления.</summary>
+    public static InlineKeyboardMarkup ProductCategoryManageActions(int categoryId) => new(new[]
+    {
+        new[] { InlineKeyboardButton.WithCallbackData("✏️ Переименовать", Callbacks.Build(Callbacks.ProductCategoryRename, categoryId)) },
+        new[] { InlineKeyboardButton.WithCallbackData("🗑 Удалить", Callbacks.Build(Callbacks.ProductCategoryDelete, categoryId)) },
+        new[] { InlineKeyboardButton.WithCallbackData("◀️ Назад", Callbacks.ProductCategoryManage) }
+    });
+
+    /// <summary>Подтверждение удаления подкатегории — продукты внутри не удаляются, только теряют подкатегорию.</summary>
+    public static InlineKeyboardMarkup ProductCategoryDeleteConfirm(int categoryId) => new(new[]
+    {
+        new[] { InlineKeyboardButton.WithCallbackData("🗑 Да, удалить", Callbacks.Build(Callbacks.ProductCategoryDeleteConfirm, categoryId)) },
+        new[] { InlineKeyboardButton.WithCallbackData("◀️ Назад", Callbacks.Build(Callbacks.ProductCategoryManagePick, categoryId)) }
+    });
+
+    /// <summary>Выбор подкатегории, в которую «перетаскивается» продукт.</summary>
+    public static InlineKeyboardMarkup FavoriteMoveCategoryChoice(int favoriteId, IReadOnlyList<ProductCategory> categories)
+    {
+        var rows = new List<InlineKeyboardButton[]>();
+
+        foreach (var category in categories)
+        {
+            rows.Add(new[]
+            {
+                InlineKeyboardButton.WithCallbackData(category.Name, Callbacks.Build(Callbacks.FavoriteMoveCategoryConfirm, $"{favoriteId}:{category.Id}"))
+            });
+        }
+
+        rows.Add(new[] { InlineKeyboardButton.WithCallbackData("📦 Без категории", Callbacks.Build(Callbacks.FavoriteMoveCategoryConfirm, $"{favoriteId}:0")) });
+        rows.Add(new[] { InlineKeyboardButton.WithCallbackData("❌ Отмена", Callbacks.Build(Callbacks.FavoriteDetails, favoriteId)) });
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    /// <summary>Карточка блюда: каждый ингредиент — отдельная кнопка удаления, плюс добавление и удаление блюда целиком.</summary>
+    public static InlineKeyboardMarkup DishDetailsActions(
+        int dishId, IReadOnlyList<DishIngredient> ingredients, Func<DishIngredient, string> labelFactory)
+    {
+        var rows = new List<InlineKeyboardButton[]>();
+
+        foreach (var ingredient in ingredients)
+        {
+            rows.Add(new[]
+            {
+                InlineKeyboardButton.WithCallbackData(labelFactory(ingredient), Callbacks.Build(Callbacks.DishIngredientDeleteRequest, $"{dishId}:{ingredient.Id}"))
+            });
+        }
+
+        rows.Add(new[] { InlineKeyboardButton.WithCallbackData("➕ Добавить ингредиент", Callbacks.Build(Callbacks.DishAddIngredient, dishId)) });
+        rows.Add(new[] { InlineKeyboardButton.WithCallbackData("🗑 Удалить блюдо целиком", Callbacks.Build(Callbacks.DeleteFavorite, dishId)) });
+        rows.Add(new[] { InlineKeyboardButton.WithCallbackData("◀️ К списку блюд", Callbacks.Build(Callbacks.DishPage, 0)) });
+        return new InlineKeyboardMarkup(rows);
+    }
+
+    /// <summary>Подтверждение удаления ингредиента блюда.</summary>
+    public static InlineKeyboardMarkup DishIngredientDeleteConfirm(int dishId, int ingredientId) => new(new[]
+    {
+        new[] { InlineKeyboardButton.WithCallbackData("🗑 Да, удалить", Callbacks.Build(Callbacks.DishIngredientDeleteConfirm, $"{dishId}:{ingredientId}")) },
+        new[] { InlineKeyboardButton.WithCallbackData("◀️ Назад", Callbacks.Build(Callbacks.DishDetails, dishId)) }
+    });
 
     private static List<InlineKeyboardButton[]> NavigationRows(int page, int totalPages, string pageAction)
     {

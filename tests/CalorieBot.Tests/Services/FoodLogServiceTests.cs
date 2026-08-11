@@ -100,4 +100,40 @@ public class FoodLogServiceTests
 
         Assert.Empty(current);
     }
+
+    [Fact]
+    public async Task DeleteAsync_RemovesOwnedEntry_AndReturnsTrue()
+    {
+        var h = CreateHarness();
+        var draft = ProductDraft.FromMacros("Йогурт", proteins: 5, fats: 2, carbs: 8);
+        var entry = await h.FoodLog.LogAsync(1, draft, MealType.Snack, null, CancellationToken.None);
+
+        var deleted = await h.FoodLog.DeleteAsync(1, entry.Id, CancellationToken.None);
+
+        Assert.True(deleted);
+        Assert.Empty(await h.FoodLog.GetCurrentCycleAsync(1, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task DeleteAsync_WithOtherUsersEntry_ReturnsFalse_AndDoesNotDelete()
+    {
+        var h = CreateHarness();
+        var draft = ProductDraft.FromMacros("Йогурт", proteins: 5, fats: 2, carbs: 8);
+        var entry = await h.FoodLog.LogAsync(1, draft, MealType.Snack, null, CancellationToken.None);
+
+        var deleted = await h.FoodLog.DeleteAsync(2, entry.Id, CancellationToken.None);
+
+        Assert.False(deleted);
+        Assert.Single(await h.FoodLog.GetCurrentCycleAsync(1, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task DeleteAsync_WithUnknownId_ReturnsFalse()
+    {
+        var h = CreateHarness();
+
+        var deleted = await h.FoodLog.DeleteAsync(1, entryId: 999, CancellationToken.None);
+
+        Assert.False(deleted);
+    }
 }

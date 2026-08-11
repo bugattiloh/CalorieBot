@@ -35,6 +35,24 @@ public sealed class ConversationContext
     /// <summary>Id сообщения с инлайн-клавиатурой, которое я редактирую по ходу диалога.</summary>
     public int? ActiveInlineMessageId { get; set; }
 
+    /// <summary>Id закрытого цикла, в который сейчас добавляется запись задним числом — только для этого мини-диалога.</summary>
+    public int? EditingCycleId { get; set; }
+
+    /// <summary>
+    /// Порция выбранного из избранного продукта плавающая и меряется в литрах (категория «Вода»), а не в граммах.
+    /// Меняет только подсказку и парсинг на шаге <see cref="ConversationState.AwaitingMealServingGrams"/>.
+    /// </summary>
+    public bool IsLiterServing { get; set; }
+
+    /// <summary>Подкатегория «Продуктов», в которую попадёт новый продукт — задаю перед стартом обычного flow добавления.</summary>
+    public int? PendingProductCategoryId { get; set; }
+
+    /// <summary>Id блюда, в которое сейчас добавляется ингредиент.</summary>
+    public int? EditingDishId { get; set; }
+
+    /// <summary>Id подкатегории «Продуктов», которую сейчас переименовывают. Null — значит, создаётся новая.</summary>
+    public int? EditingProductCategoryId { get; set; }
+
     /// <summary>Собираю черновик из накопленного ввода.</summary>
     public ProductDraft ToDraft() => new()
     {
@@ -70,5 +88,10 @@ public sealed class ConversationContext
         ServingSize = null;
         FavoriteProductId = null;
         ActiveInlineMessageId = null;
+        EditingCycleId = null;
+        IsLiterServing = false;
+        PendingProductCategoryId = null;
+        EditingDishId = null;
+        EditingProductCategoryId = null;
     }
 }

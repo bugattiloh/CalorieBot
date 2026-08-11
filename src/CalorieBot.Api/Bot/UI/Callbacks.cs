@@ -66,6 +66,81 @@ public static class Callbacks
     /// <summary>Выбран режим отслеживания лимита: lm:cal или lm:macro.</summary>
     public const string LimitMode = "lm";
 
+    /// <summary>Ответ на предупреждение о повторе названия приёма пищи: dmc:yes:{mealType}:{entryId} или dmc:no:{mealType}:{entryId}.</summary>
+    public const string DuplicateMealConfirm = "dmc";
+
+    /// <summary>Открыть карточку конкретного прошлого цикла: cd:{cycleId}.</summary>
+    public const string CycleDetails = "cd";
+
+    /// <summary>Запрос на удаление записи из прошлого цикла: cedr:{cycleId}:{entryId}.</summary>
+    public const string CycleEntryDeleteRequest = "cedr";
+
+    /// <summary>Подтверждение удаления записи из прошлого цикла: cedc:{cycleId}:{entryId}.</summary>
+    public const string CycleEntryDeleteConfirm = "cedc";
+
+    /// <summary>Начать добавление записи задним числом в прошлый цикл: cae:{cycleId}.</summary>
+    public const string CycleAddEntry = "cae";
+
+    /// <summary>Выбран тип приёма пищи для записи, добавляемой в прошлый цикл: cemt:{cycleId}:{mealType}.</summary>
+    public const string CycleEntryMealType = "cemt";
+
+    /// <summary>Запрошен отчёт за период из «Мой прогресс»: pr:7 или pr:30.</summary>
+    public const string PeriodReport = "pr";
+
+    /// <summary>Листание списка «Вода»: wap:{page}.</summary>
+    public const string WaterPage = "wap";
+
+    /// <summary>Начать добавление нового элемента в «Воду».</summary>
+    public const string WaterAdd = "wad";
+
+    /// <summary>Листание списка «Готовые блюда»: dip:{page}.</summary>
+    public const string DishPage = "dip";
+
+    /// <summary>Начать создание нового блюда.</summary>
+    public const string DishAdd = "dad";
+
+    /// <summary>Открыть карточку блюда: dd:{dishId}.</summary>
+    public const string DishDetails = "dd";
+
+    /// <summary>Начать добавление ингредиента в блюдо: dai:{dishId}.</summary>
+    public const string DishAddIngredient = "dai";
+
+    /// <summary>Запрос на удаление ингредиента: didr:{dishId}:{ingredientId}.</summary>
+    public const string DishIngredientDeleteRequest = "didr";
+
+    /// <summary>Подтверждение удаления ингредиента: didc:{dishId}:{ingredientId}.</summary>
+    public const string DishIngredientDeleteConfirm = "didc";
+
+    /// <summary>Выбрана подкатегория «Продуктов» для просмотра: pcat:{categoryId}, листание — pcat:{categoryId}:{page}.</summary>
+    public const string ProductCategoryPick = "pcat";
+
+    /// <summary>Начать добавление продукта в конкретную подкатегорию: pah:{categoryId}.</summary>
+    public const string ProductAddHere = "pah";
+
+    /// <summary>Начать создание новой подкатегории «Продуктов».</summary>
+    public const string ProductCategoryNew = "pcn";
+
+    /// <summary>Показать список подкатегорий в режиме управления (переименовать/удалить).</summary>
+    public const string ProductCategoryManage = "pcm";
+
+    /// <summary>Выбрана подкатегория в режиме управления: pcmp:{categoryId}.</summary>
+    public const string ProductCategoryManagePick = "pcmp";
+
+    /// <summary>Начать переименование подкатегории: pcr:{categoryId}.</summary>
+    public const string ProductCategoryRename = "pcr";
+
+    /// <summary>Запрос на удаление подкатегории: pcd:{categoryId}.</summary>
+    public const string ProductCategoryDelete = "pcd";
+
+    /// <summary>Подтверждение удаления подкатегории: pcdy:{categoryId}.</summary>
+    public const string ProductCategoryDeleteConfirm = "pcdy";
+
+    /// <summary>Открыть выбор подкатегории для переноса продукта: fmc:{favoriteId}.</summary>
+    public const string FavoriteMoveCategory = "fmc";
+
+    /// <summary>Подтверждён перенос продукта в другую подкатегорию: fmcc:{favoriteId}:{categoryId|none}.</summary>
+    public const string FavoriteMoveCategoryConfirm = "fmcc";
+
     /// <summary>Кнопка-заглушка (например, счётчик страниц) — ничего не делает.</summary>
     public const string Noop = "noop";
 

@@ -46,5 +46,29 @@ public enum ConversationState
     AwaitingLimitMode = 21,
 
     /// <summary>Жду новые дневные лимиты по белкам/жирам/углеводам.</summary>
-    AwaitingMacroLimits = 22
+    AwaitingMacroLimits = 22,
+
+    /// <summary>Жду название продукта, который добавляем задним числом в уже закрытый цикл.</summary>
+    AwaitingCycleEntryName = 30,
+
+    /// <summary>Жду БЖУ продукта, который добавляем задним числом в уже закрытый цикл.</summary>
+    AwaitingCycleEntryMacros = 31,
+
+    /// <summary>Жду название нового элемента «Воды» (жидкости) для избранного.</summary>
+    AwaitingWaterName = 40,
+
+    /// <summary>Жду БЖУ нового элемента «Воды» — всегда на 1 литр, шаг типа порции здесь не нужен.</summary>
+    AwaitingWaterMacros = 41,
+
+    /// <summary>Жду название нового готового блюда.</summary>
+    AwaitingDishName = 50,
+
+    /// <summary>Жду название ингредиента, добавляемого в блюдо.</summary>
+    AwaitingDishIngredientName = 51,
+
+    /// <summary>Жду БЖУ ингредиента, добавляемого в блюдо.</summary>
+    AwaitingDishIngredientMacros = 52,
+
+    /// <summary>Жду название подкатегории «Продуктов» — новой или переименовываемой (см. <see cref="ConversationContext.EditingProductCategoryId"/>).</summary>
+    AwaitingProductCategoryName = 60
 }

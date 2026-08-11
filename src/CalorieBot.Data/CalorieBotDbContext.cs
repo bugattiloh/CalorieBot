@@ -20,6 +20,10 @@ public class CalorieBotDbContext : DbContext
 
     public DbSet<CalorieCycle> CalorieCycles => Set<CalorieCycle>();
 
+    public DbSet<ProductCategory> ProductCategories => Set<ProductCategory>();
+
+    public DbSet<DishIngredient> DishIngredients => Set<DishIngredient>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -56,14 +60,55 @@ public class CalorieBotDbContext : DbContext
             entity.Property(e => e.IsFixedServing).IsRequired().HasDefaultValue(true);
             entity.Property(e => e.ServingSize).HasColumnType("text");
             entity.Property(e => e.CreatedAt).HasColumnType("timestamp with time zone").HasDefaultValueSql("now()");
+            entity.Property(e => e.CategoryKind).HasConversion<int>().IsRequired().HasDefaultValue(FavoriteCategoryKind.Product);
 
             entity.HasOne(e => e.User)
                 .WithMany(u => u.FavoriteProducts)
                 .HasForeignKey(e => e.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            // Категорию могут удалить — продукт остаётся, просто становится «без подкатегории».
+            entity.HasOne(e => e.ProductCategory)
+                .WithMany()
+                .HasForeignKey(e => e.ProductCategoryId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             // Один и тот же продукт дважды в избранном мне не нужен.
             entity.HasIndex(e => new { e.UserId, e.Name }).IsUnique();
+        });
+
+        modelBuilder.Entity<ProductCategory>(entity =>
+        {
+            entity.ToTable("ProductCategories");
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.Name).HasColumnType("text").IsRequired();
+            entity.Property(e => e.IsBuiltIn).IsRequired().HasDefaultValue(false);
+
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.ProductCategories)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.UserId, e.Name }).IsUnique();
+        });
+
+        modelBuilder.Entity<DishIngredient>(entity =>
+        {
+            entity.ToTable("DishIngredients");
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.Name).HasColumnType("text").IsRequired();
+            entity.Property(e => e.Proteins).HasColumnType("numeric(7,2)").HasDefaultValue(0m);
+            entity.Property(e => e.Fats).HasColumnType("numeric(7,2)").HasDefaultValue(0m);
+            entity.Property(e => e.Carbs).HasColumnType("numeric(7,2)").HasDefaultValue(0m);
+            entity.Property(e => e.Calories).IsRequired();
+
+            // Блюдо удалили — его ингредиенты сами по себе больше не нужны.
+            entity.HasOne(e => e.DishFavoriteProduct)
+                .WithMany(p => p.DishIngredients)
+                .HasForeignKey(e => e.DishFavoriteProductId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<FoodLogEntry>(entity =>

@@ -20,6 +20,9 @@ public interface IFoodLogService
 
     /// <summary>Всё, что съедено с начала текущего цикла (<see cref="AppUser.CycleStartedAt"/>), по порядку добавления.</summary>
     Task<IReadOnlyList<FoodLogEntry>> GetCurrentCycleAsync(long userId, CancellationToken ct);
+
+    /// <summary>Удаляю запись журнала (например, при замене дубля новой записью). Возвращаю false, если её уже нет.</summary>
+    Task<bool> DeleteAsync(long userId, int entryId, CancellationToken ct);
 }
 
 /// <inheritdoc />
@@ -80,5 +83,20 @@ public sealed class FoodLogService : IFoodLogService
             .Where(e => e.UserId == userId && e.LoggedAt >= user.CycleStartedAt)
             .OrderBy(e => e.LoggedAt)
             .ToListAsync(ct);
+    }
+
+    public async Task<bool> DeleteAsync(long userId, int entryId, CancellationToken ct)
+    {
+        var entry = await _db.FoodLog.FirstOrDefaultAsync(e => e.Id == entryId && e.UserId == userId, ct);
+        if (entry is null)
+        {
+            return false;
+        }
+
+        _db.FoodLog.Remove(entry);
+        await _db.SaveChangesAsync(ct);
+
+        _logger.LogInformation("Удалил запись журнала {EntryId} ({ProductName}) у пользователя {UserId}", entry.Id, entry.ProductName, userId);
+        return true;
     }
 }

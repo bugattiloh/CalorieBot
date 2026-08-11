@@ -99,4 +99,25 @@ public sealed class BotMessenger
             _logger.LogDebug(ex, "Не смог ответить на callback {CallbackId} — вероятно, он устарел", query.Id);
         }
     }
+
+    /// <summary>
+    /// Отправляю новое сообщение либо переписываю существующее — общая точка для постраничных
+    /// списков и карточек, которым всё равно, это первый показ экрана или его обновление.
+    /// </summary>
+    public async Task SendOrEditAsync(
+        long chatId,
+        int? editMessageId,
+        string text,
+        InlineKeyboardMarkup? replyMarkup,
+        CancellationToken ct = default)
+    {
+        if (editMessageId is null)
+        {
+            await SendAsync(chatId, text, replyMarkup, ct);
+        }
+        else
+        {
+            await EditAsync(chatId, editMessageId.Value, text, replyMarkup, ct);
+        }
+    }
 }

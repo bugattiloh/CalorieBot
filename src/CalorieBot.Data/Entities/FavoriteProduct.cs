@@ -34,5 +34,16 @@ public class FavoriteProduct
 
     public DateTime CreatedAt { get; set; }
 
+    /// <summary>Вода, готовое блюдо или обычный продукт — определяет, как продукт логируется и где лежит в «Избранном».</summary>
+    public FavoriteCategoryKind CategoryKind { get; set; } = FavoriteCategoryKind.Product;
+
+    /// <summary>Подкатегория внутри «Продукты» — только для <see cref="FavoriteCategoryKind.Product"/>, для остальных всегда null.</summary>
+    public int? ProductCategoryId { get; set; }
+
     public AppUser? User { get; set; }
+
+    public ProductCategory? ProductCategory { get; set; }
+
+    /// <summary>Ингредиенты — только для <see cref="FavoriteCategoryKind.Dish"/>, для остальных всегда пусто.</summary>
+    public ICollection<DishIngredient> DishIngredients { get; set; } = new List<DishIngredient>();
 }

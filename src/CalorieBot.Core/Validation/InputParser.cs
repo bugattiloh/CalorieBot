@@ -24,9 +24,20 @@ public static partial class InputParser
     public const int MinServingGrams = 1;
     public const int MaxServingGrams = 5000;
 
+    /// <summary>Разумные границы объёма для «Воды», литры.</summary>
+    public const decimal MinLiters = 0.05m;
+    public const decimal MaxLiters = 10m;
+
     /// <summary>Вытаскиваю из строки все числа, разделитель дробной части допускаю любой.</summary>
     [GeneratedRegex(@"\d+(?:[.,]\d+)?", RegexOptions.CultureInvariant)]
     private static partial Regex NumberRegex();
+
+    /// <summary>
+    /// Одно число БЖУ целиком: только цифры, без знака (отрицательные запрещаю явно — знак «-»
+    /// в этот класс символов не входит), не больше одного знака после точки или запятой.
+    /// </summary>
+    [GeneratedRegex(@"^\d+([.,]\d)?$", RegexOptions.CultureInvariant)]
+    private static partial Regex StrictMacroValueRegex();
 
     /// <summary>Проверяю название продукта: длина, отсутствие переводов строк и служебных символов.</summary>
     public static bool TryParseProductName(string? input, out string name, out string error)
@@ -61,8 +72,10 @@ public static partial class InputParser
     }
 
     /// <summary>
-    /// Разбираю строку с БЖУ. Жду ровно три числа в порядке «белки жиры углеводы»,
-    /// разделитель любой: пробел, запятая, точка с запятой, перевод строки.
+    /// Разбираю строку с БЖУ. Жду строго три числа через пробел в порядке «белки жиры углеводы» —
+    /// без отрицательных значений и не больше одного знака после запятой/точки в каждом.
+    /// Формат жёсткий специально: значения БЖУ участвуют в расчёте калорий и лимитов,
+    /// а «12,5 5.0;30» и подобные вольности с разделителями легко приводят к неверному вводу.
     /// </summary>
     public static bool TryParseMacros(
         string? input,
@@ -74,19 +87,19 @@ public static partial class InputParser
         proteins = fats = carbs = 0m;
         error = string.Empty;
 
-        var matches = NumberRegex().Matches(input ?? string.Empty);
-        if (matches.Count != 3)
+        var tokens = (input ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length != 3)
         {
-            error = "Нужно ровно три числа: белки, жиры, углеводы. Например: <code>12 5 30</code>";
+            error = "Нужно ровно три числа через пробел: белки жиры углеводы. Например: <code>12 5 1</code>";
             return false;
         }
 
         var values = new decimal[3];
         for (var i = 0; i < 3; i++)
         {
-            if (!TryParseDecimal(matches[i].Value, out values[i]))
+            if (!StrictMacroValueRegex().IsMatch(tokens[i]) || !TryParseDecimal(tokens[i], out values[i]))
             {
-                error = "Не понял число. Используйте формат вида <code>12.5</code> или <code>12,5</code>.";
+                error = "Каждое число — без знака «минус» и не больше одного знака после запятой. Например: <code>12 5 1</code>";
                 return false;
             }
 
@@ -169,6 +182,36 @@ public static partial class InputParser
         }
 
         grams = rounded;
+        return true;
+    }
+
+    /// <summary>Разбираю выпитый объём в литрах — нужен, чтобы пересчитать БЖУ с 1 л на реальную порцию.</summary>
+    public static bool TryParseLiters(string? input, out decimal liters, out string error)
+    {
+        liters = 0m;
+        error = string.Empty;
+
+        var matches = NumberRegex().Matches(input ?? string.Empty);
+        if (matches.Count != 1)
+        {
+            error = "Отправьте одно число — сколько литров. Например: <code>0.5</code>";
+            return false;
+        }
+
+        if (!TryParseDecimal(matches[0].Value, out var value))
+        {
+            error = "Не понял число. Отправьте объём в литрах, например <code>0.5</code>.";
+            return false;
+        }
+
+        var rounded = Math.Round(value, 2);
+        if (rounded < MinLiters || rounded > MaxLiters)
+        {
+            error = $"Объём должен быть от {MinLiters:0.##} до {MaxLiters:0.#} л.";
+            return false;
+        }
+
+        liters = rounded;
         return true;
     }
 

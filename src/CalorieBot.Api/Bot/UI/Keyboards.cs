@@ -38,11 +38,10 @@ public static class Keyboards
         IsPersistent = true
     };
 
-    /// <summary>Подменю «Избранное» — три группы вместо одного огромного списка.</summary>
+    /// <summary>Подменю «Избранное» — три равноправные группы в одном ряду вместо одного огромного списка.</summary>
     public static ReplyKeyboardMarkup FavoritesMenu { get; } = new(new[]
     {
-        new KeyboardButton[] { Buttons.Water, Buttons.Dishes },
-        new KeyboardButton[] { Buttons.Products },
+        new KeyboardButton[] { Buttons.Water, Buttons.Dishes, Buttons.Products },
         new KeyboardButton[] { Buttons.DeleteFavorite },
         new KeyboardButton[] { Buttons.Back }
     })
@@ -78,21 +77,25 @@ public static class Keyboards
         new[] { InlineKeyboardButton.WithCallbackData("🔙 В меню", Callbacks.ToMenu) }
     });
 
-    /// <summary>Выбор режима ввода БЖУ для записи в дневник (<see cref="Callbacks.MealMacrosMode"/>).</summary>
+    /// <summary>
+    /// Выбор режима ввода БЖУ для записи в дневник (<see cref="Callbacks.MealMacrosMode"/>). Подписи кнопок
+    /// намеренно совпадают с <see cref="FavoriteServingModeChoice"/> — это один и тот же выбор
+    /// (целиком/на 100 г), и в разных местах бота он не должен звучать по-разному.
+    /// </summary>
     public static InlineKeyboardMarkup MacrosModeChoice(string action) => new(new[]
     {
-        new[] { InlineKeyboardButton.WithCallbackData("📏 На 100 г продукта", Callbacks.Build(action, "100")) },
-        new[] { InlineKeyboardButton.WithCallbackData("🍽 На порцию целиком", Callbacks.Build(action, "full")) }
+        new[] { InlineKeyboardButton.WithCallbackData("📏 На 100 г", Callbacks.Build(action, "100")) },
+        new[] { InlineKeyboardButton.WithCallbackData("🍽 Порция целиком", Callbacks.Build(action, "full")) }
     });
 
     /// <summary>
-    /// Выбор типа порции для избранного — та же механика (100/full), что и <see cref="MacrosModeChoice"/>,
-    /// но формулировка подчёркивает, что это постоянное свойство продукта, а не разовое удобство ввода.
+    /// Тот же выбор типа порции, что и <see cref="MacrosModeChoice"/>, только для избранного — здесь это
+    /// постоянное свойство продукта, а не разовое удобство ввода, поэтому порядок кнопок другой (под порядок вопроса).
     /// </summary>
     public static InlineKeyboardMarkup FavoriteServingModeChoice { get; } = new(new[]
     {
-        new[] { InlineKeyboardButton.WithCallbackData("🍽 Фиксированная порция", Callbacks.Build(Callbacks.FavoriteMacrosMode, "full")) },
-        new[] { InlineKeyboardButton.WithCallbackData("📏 На 100 г (порция плавающая)", Callbacks.Build(Callbacks.FavoriteMacrosMode, "100")) }
+        new[] { InlineKeyboardButton.WithCallbackData("🍽 Порция целиком", Callbacks.Build(Callbacks.FavoriteMacrosMode, "full")) },
+        new[] { InlineKeyboardButton.WithCallbackData("📏 На 100 г", Callbacks.Build(Callbacks.FavoriteMacrosMode, "100")) }
     });
 
     /// <summary>
@@ -111,7 +114,7 @@ public static class Keyboards
             rows.Add(new[]
             {
                 InlineKeyboardButton.WithCallbackData(
-                    product.IsFixedServing ? "🔁 Сделать порцию плавающей" : "🔁 Сделать порцию фиксированной",
+                    product.IsFixedServing ? "🔁 Порция → на 100 г" : "🔁 Порция → целиком",
                     Callbacks.Build(Callbacks.FavoriteToggleFixed, product.Id))
             });
             rows.Add(new[]
@@ -252,7 +255,7 @@ public static class Keyboards
 
         foreach (var cycle in cycles)
         {
-            rows.Add(new[] { InlineKeyboardButton.WithCallbackData($"✏️ Открыть цикл {index}", Callbacks.Build(Callbacks.CycleDetails, cycle.Id)) });
+            rows.Add(new[] { InlineKeyboardButton.WithCallbackData($"📅 Цикл {index}", Callbacks.Build(Callbacks.CycleDetails, cycle.Id)) });
             index++;
         }
 
@@ -301,7 +304,7 @@ public static class Keyboards
             InlineKeyboardButton.WithCallbackData("🍝 Ужин", Callbacks.Build(Callbacks.CycleEntryMealType, $"{cycleId}:{(int)MealType.Dinner}")),
             InlineKeyboardButton.WithCallbackData("🍎 Перекус", Callbacks.Build(Callbacks.CycleEntryMealType, $"{cycleId}:{(int)MealType.Snack}"))
         },
-        new[] { InlineKeyboardButton.WithCallbackData("◀️ Отмена", Callbacks.Build(Callbacks.CycleDetails, cycleId)) }
+        new[] { InlineKeyboardButton.WithCallbackData("❌ Отмена", Callbacks.Build(Callbacks.CycleDetails, cycleId)) }
     });
 
     /// <summary>

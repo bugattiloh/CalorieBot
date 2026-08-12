@@ -19,8 +19,9 @@ public static class Buttons
     public const string NewProduct = "🔍 Новый продукт";
 
     // Подменю «Избранное» — три группы вместо одного огромного списка.
+    // 🍱 не 🍲 — 🍲 уже занята «Обедом» в выборе типа приёма пищи, дублировать иконку в разных смыслах не стоит.
     public const string Water = "💧 Вода";
-    public const string Dishes = "🍲 Готовые блюда";
+    public const string Dishes = "🍱 Готовые блюда";
     public const string Products = "🥘 Продукты";
     public const string DeleteFavorite = "🗑 Удалить из избранного";
 

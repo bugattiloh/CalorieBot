@@ -61,6 +61,22 @@ public class FavoritesScenarioTests
     }
 
     [Fact]
+    public async Task ShowWaterListAsync_WithFloatingServingItem_ShowsPerLiterSuffix()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetByCategoryAsync(UserId, FavoriteCategoryKind.Water, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new FavoriteProduct { Id = 1, Name = "Морс", CategoryKind = FavoriteCategoryKind.Water, IsFixedServing = false, Calories = 40 }
+            });
+
+        await h.Scenario.ShowWaterListAsync(ChatId, UserId, page: 0, editMessageId: null, CancellationToken.None);
+
+        var keyboard = Assert.IsType<InlineKeyboardMarkup>(h.Bot.Sent[0].ReplyMarkup);
+        Assert.Contains(keyboard.InlineKeyboard.SelectMany(row => row), b => b.Text.Contains("Морс — 40 ккал/л"));
+    }
+
+    [Fact]
     public async Task StartAddWaterAsync_AwaitsWaterName()
     {
         var h = CreateHarness();
@@ -142,6 +158,26 @@ public class FavoritesScenarioTests
         Assert.Single(h.Bot.Edited);
         Assert.Contains("Гречка", string.Join(" ", ((InlineKeyboardMarkup)h.Bot.Edited[0].ReplyMarkup!).InlineKeyboard.SelectMany(r => r).Select(b => b.Text)));
         Assert.Contains("Зерновые и крахмалистые", h.Bot.Edited[0].Text);
+    }
+
+    [Fact]
+    public async Task ShowProductsInCategoryAsync_DistinguishesFixedAndFloatingServingInLabels()
+    {
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetByCategoryAsync(UserId, FavoriteCategoryKind.Product, 3, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new FavoriteProduct { Id = 1, Name = "Батончик", CategoryKind = FavoriteCategoryKind.Product, ProductCategoryId = 3, IsFixedServing = true, Calories = 200 },
+                new FavoriteProduct { Id = 2, Name = "Рис", CategoryKind = FavoriteCategoryKind.Product, ProductCategoryId = 3, IsFixedServing = false, Calories = 130 }
+            });
+        h.Favorites.Setup(f => f.GetProductCategoriesAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new ProductCategory { Id = 3, Name = "Крупы" } });
+
+        await h.Scenario.ShowProductsInCategoryAsync(ChatId, UserId, categoryId: 3, page: 0, editMessageId: null, CancellationToken.None);
+
+        var buttons = ((InlineKeyboardMarkup)h.Bot.Sent[0].ReplyMarkup!).InlineKeyboard.SelectMany(r => r).Select(b => b.Text).ToList();
+        Assert.Contains(buttons, b => b.Contains("Батончик — 200 ккал") && !b.Contains("/100г"));
+        Assert.Contains(buttons, b => b.Contains("Рис — 130 ккал/100г"));
     }
 
     [Fact]

@@ -704,7 +704,7 @@ public static class Texts
 
     /// <summary>Заголовок списка «Готовые блюда».</summary>
     public static string DishListHeader(int totalDishes) =>
-        $"🍲 <b>Готовые блюда</b> ({totalDishes})\n\nВыберите блюдо, чтобы посмотреть состав, либо создайте новое.";
+        $"🍱 <b>Готовые блюда</b> ({totalDishes})\n\nВыберите блюдо, чтобы посмотреть состав, либо создайте новое.";
 
     /// <summary>Спрашиваю название нового блюда.</summary>
     public const string AskDishName =
@@ -714,7 +714,7 @@ public static class Texts
     public static string DishCard(FavoriteProduct dish)
     {
         var builder = new StringBuilder();
-        builder.AppendLine($"🍲 <b>{Escape(dish.Name)}</b>");
+        builder.AppendLine($"🍱 <b>{Escape(dish.Name)}</b>");
         builder.AppendLine();
         builder.AppendLine($"🔥 {dish.Calories} ккал · Б {Num(dish.Proteins)} · Ж {Num(dish.Fats)} · У {Num(dish.Carbs)} г");
         builder.Append("<i>КБЖУ считаются автосуммой ингредиентов — правьте состав, а не эти числа напрямую.</i>");
@@ -828,13 +828,22 @@ public static class Texts
         return $"{Escape(product.Name)}{serving} — <b>{product.Calories}</b> ккал";
     }
 
-    /// <summary>Подпись кнопки продукта. Слишком длинные названия обрезаю, иначе кнопка расползается.</summary>
+    /// <summary>
+    /// Подпись кнопки продукта. Слишком длинные названия обрезаю, иначе кнопка расползается.
+    /// Для плавающей порции (КБЖУ на 100 г или на 1 л) добавляю к калориям «/100г»/«/л» — иначе
+    /// в списке не отличить фиксированную порцию от нормированной без открытия карточки.
+    /// </summary>
     public static string ProductButtonLabel(FavoriteProduct product, bool fitsIntoLimit)
     {
         var name = product.Name.Length > 28 ? product.Name[..27] + "…" : product.Name;
         var mark = fitsIntoLimit ? string.Empty : "⚠️ ";
-        return $"{mark}{name} — {product.Calories} ккал";
+        var unit = product.IsFixedServing ? string.Empty : PerUnitSuffix(product.CategoryKind);
+        return $"{mark}{name} — {product.Calories} ккал{unit}";
     }
+
+    /// <summary>Единица нормировки для плавающей порции — литр для «Воды», иначе 100 г.</summary>
+    private static string PerUnitSuffix(FavoriteCategoryKind categoryKind) =>
+        categoryKind == FavoriteCategoryKind.Water ? "/л" : "/100г";
 
     /// <summary>Строка по одному макронутриенту: съедено и ориентир, если он посчитан.</summary>
     private static string MacroLine(string label, decimal consumed, decimal? target) =>

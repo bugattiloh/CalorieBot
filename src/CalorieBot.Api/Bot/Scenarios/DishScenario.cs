@@ -142,9 +142,10 @@ public sealed class DishScenario
         var page = parts.Length > 1 && int.TryParse(parts[1], out var parsedPage) ? parsedPage : 0;
         var userId = query.From.Id;
 
-        // Ингредиентом может стать только обычный продукт — не вода и не другое блюдо.
+        // Ингредиентом может стать продукт или жидкость (вода, молоко, сок) — но не другое блюдо,
+        // вложенность блюд автосумма не поддерживает.
         var products = (await _favorites.GetAllAsync(userId, ct))
-            .Where(p => p.CategoryKind == FavoriteCategoryKind.Product)
+            .Where(p => p.CategoryKind is FavoriteCategoryKind.Product or FavoriteCategoryKind.Water)
             .OrderBy(p => p.Name)
             .ToList();
 
@@ -155,7 +156,7 @@ public sealed class DishScenario
             await _messenger.EditAsync(
                 query.Message.Chat.Id,
                 query.Message.MessageId,
-                "В «Продуктах» пока пусто — сначала добавьте что-нибудь в ⭐ Избранное → 🥘 Продукты, либо введите ингредиент вручную.",
+                "В «Продуктах» и «Воде» пока пусто — сначала добавьте что-нибудь в ⭐ Избранное, либо введите ингредиент вручную.",
                 Keyboards.DishIngredientSourceChoice(dishId),
                 ct);
             return;
@@ -166,8 +167,9 @@ public sealed class DishScenario
     }
 
     /// <summary>
-    /// Пользователь выбрал избранный продукт как ингредиент. Фиксированная порция добавляется как есть,
-    /// плавающая (на 100 г) — сперва спрашиваю вес, как и при обычном логировании еды.
+    /// Пользователь выбрал избранный продукт (или жидкость) как ингредиент. Фиксированная порция
+    /// добавляется как есть, плавающая — сперва спрашиваю вес (или объём для воды), как и при обычном
+    /// логировании еды.
     /// </summary>
     public async Task HandlePickFavoriteIngredientAsync(CallbackQuery query, string? argument, CancellationToken ct)
     {
@@ -195,7 +197,7 @@ public sealed class DishScenario
             return;
         }
 
-        // Плавающая порция (на 100 г) — прежде чем добавить, узнаю фактический вес.
+        // Плавающая порция — прежде чем добавить, узнаю фактический вес (граммы) или объём (литры для воды).
         var context = _states.Get(userId);
         context.Reset();
         context.EditingDishId = dishId;
@@ -203,13 +205,15 @@ public sealed class DishScenario
         context.Proteins = favorite.Proteins;
         context.Fats = favorite.Fats;
         context.Carbs = favorite.Carbs;
+        context.IsLiterServing = favorite.CategoryKind == FavoriteCategoryKind.Water;
         context.State = ConversationState.AwaitingDishIngredientGrams;
 
+        var prompt = context.IsLiterServing ? Texts.AskServingLiters : Texts.AskServingGrams;
         await _messenger.AnswerAsync(query, ct: ct);
-        await _messenger.EditAsync(query.Message.Chat.Id, query.Message.MessageId, Texts.AskServingGrams, replyMarkup: null, ct);
+        await _messenger.EditAsync(query.Message.Chat.Id, query.Message.MessageId, prompt, replyMarkup: null, ct);
     }
 
-    /// <summary>Принимаю вес плавающей порции избранного ингредиента, пересчитываю БЖУ и добавляю его в блюдо.</summary>
+    /// <summary>Принимаю вес (или объём) плавающей порции избранного ингредиента, пересчитываю БЖУ и добавляю его в блюдо.</summary>
     public async Task HandleIngredientGramsAsync(long chatId, long userId, string? text, CancellationToken ct)
     {
         var context = _states.Get(userId);
@@ -221,19 +225,38 @@ public sealed class DishScenario
             return;
         }
 
-        if (!InputParser.TryParseServingGrams(text, out var grams, out var error))
+        decimal scale;
+        string servingSizeText;
+
+        if (context.IsLiterServing)
         {
-            await _messenger.SendAsync(chatId, Texts.ValidationError(error), Keyboards.FavoritesMenu, ct);
-            return;
+            if (!InputParser.TryParseLiters(text, out var liters, out var literError))
+            {
+                await _messenger.SendAsync(chatId, Texts.ValidationError(literError), Keyboards.FavoritesMenu, ct);
+                return;
+            }
+
+            scale = liters;
+            servingSizeText = $"{Texts.Num(liters)} л";
+        }
+        else
+        {
+            if (!InputParser.TryParseServingGrams(text, out var grams, out var error))
+            {
+                await _messenger.SendAsync(chatId, Texts.ValidationError(error), Keyboards.FavoritesMenu, ct);
+                return;
+            }
+
+            scale = grams / 100m;
+            servingSizeText = $"{grams} г";
         }
 
-        var scale = grams / 100m;
         var draft = ProductDraft.FromMacros(
             context.ProductName,
             Math.Round(context.Proteins * scale, 1),
             Math.Round(context.Fats * scale, 1),
             Math.Round(context.Carbs * scale, 1),
-            servingSize: $"{grams} г");
+            servingSize: servingSizeText);
 
         context.Reset();
 

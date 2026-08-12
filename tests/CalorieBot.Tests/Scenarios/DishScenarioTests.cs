@@ -141,14 +141,14 @@ public class DishScenarioTests
     }
 
     [Fact]
-    public async Task ShowFavoriteIngredientPickerAsync_ListsProductFavoritesOnly()
+    public async Task ShowFavoriteIngredientPickerAsync_ListsProductsAndWater_ButNotOtherDishes()
     {
         var h = CreateHarness();
         h.Favorites.Setup(f => f.GetAllAsync(UserId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[]
             {
                 new FavoriteProduct { Id = 1, Name = "Гречка", CategoryKind = FavoriteCategoryKind.Product },
-                new FavoriteProduct { Id = 2, Name = "Вода", CategoryKind = FavoriteCategoryKind.Water },
+                new FavoriteProduct { Id = 2, Name = "Молоко", CategoryKind = FavoriteCategoryKind.Water },
                 new FavoriteProduct { Id = 3, Name = "Салат", CategoryKind = FavoriteCategoryKind.Dish }
             });
 
@@ -159,7 +159,7 @@ public class DishScenarioTests
         var keyboard = Assert.IsType<InlineKeyboardMarkup>(h.Bot.Edited[0].ReplyMarkup);
         var labels = keyboard.InlineKeyboard.SelectMany(row => row).Select(b => b.Text).ToList();
         Assert.Contains(labels, l => l.Contains("Гречка"));
-        Assert.DoesNotContain(labels, l => l.Contains("Вода"));
+        Assert.Contains(labels, l => l.Contains("Молоко"));
         Assert.DoesNotContain(labels, l => l.Contains("Салат"));
     }
 
@@ -220,6 +220,51 @@ public class DishScenarioTests
 
         h.Favorites.Verify(f => f.AddDishIngredientAsync(
                 UserId, 7, It.Is<ProductDraft>(d => d.Proteins == 10.5m && d.ServingSize == "150 г"), It.IsAny<CancellationToken>()),
+            Times.Once);
+        Assert.Null(h.States.Get(UserId).EditingDishId);
+    }
+
+    [Fact]
+    public async Task HandlePickFavoriteIngredientAsync_WithWaterFavorite_AsksForLitersInsteadOfGrams()
+    {
+        // «Мюсли с молоком» — молоко из «Воды» тоже можно добавить ингредиентом в блюдо.
+        var h = CreateHarness();
+        h.Favorites.Setup(f => f.GetAsync(UserId, 2, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FavoriteProduct { Id = 2, Name = "Молоко", IsFixedServing = false, CategoryKind = FavoriteCategoryKind.Water, Proteins = 3, Fats = 3.2m, Carbs = 4.7m });
+
+        var query = BuildCallbackQuery("dipf:7:2");
+        await h.Scenario.HandlePickFavoriteIngredientAsync(query, argument: "7:2", CancellationToken.None);
+
+        var context = h.States.Get(UserId);
+        Assert.Equal(7, context.EditingDishId);
+        Assert.Equal("Молоко", context.ProductName);
+        Assert.True(context.IsLiterServing);
+        Assert.Equal(ConversationState.AwaitingDishIngredientGrams, context.State);
+        Assert.Contains("литров", h.Bot.Edited[0].Text);
+    }
+
+    [Fact]
+    public async Task HandleIngredientGramsAsync_WithLiterServing_ScalesMacrosByLitersAndFormatsServingSizeInLiters()
+    {
+        var h = CreateHarness();
+        var context = h.States.Get(UserId);
+        context.EditingDishId = 7;
+        context.ProductName = "Молоко";
+        context.Proteins = 3;
+        context.Fats = 3.2m;
+        context.Carbs = 4.7m;
+        context.IsLiterServing = true;
+        context.State = ConversationState.AwaitingDishIngredientGrams;
+
+        h.Favorites.Setup(f => f.AddDishIngredientAsync(UserId, 7, It.IsAny<ProductDraft>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FavoriteProduct { Id = 7, Name = "Мюсли с молоком", CategoryKind = FavoriteCategoryKind.Dish });
+        h.Favorites.Setup(f => f.GetDishIngredientsAsync(UserId, 7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<DishIngredient>());
+
+        await h.Scenario.HandleIngredientGramsAsync(ChatId, UserId, "0.2", CancellationToken.None);
+
+        h.Favorites.Verify(f => f.AddDishIngredientAsync(
+                UserId, 7, It.Is<ProductDraft>(d => d.Proteins == 0.6m && d.ServingSize == "0.2 л"), It.IsAny<CancellationToken>()),
             Times.Once);
         Assert.Null(h.States.Get(UserId).EditingDishId);
     }
